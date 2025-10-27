@@ -12,17 +12,20 @@ export default async function handler(req, res) {
   try {
     const { userData, productComponents } = req.body;
 
+    // Debug logs
+    console.log("Received body from frontend:", req.body);
+
     if (!userData || !productComponents) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     const prompt = `
-    As a skincare expert, from the provided user data and product components, 
-    write how much would you give the score based on compatibility with the user's skin and why:
-    User data: ${JSON.stringify(userData)}
-    Product components: ${productComponents}
-    Give a compatibility score (0–100) and explain briefly why.
-    `;
+As a skincare expert, from the provided user data and product components, 
+write how much would you give the score based on compatibility with the user's skin and why:
+User data: ${JSON.stringify(userData)}
+Product components: ${productComponents}
+Give a compatibility score (0–100) and explain briefly why.
+`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-5-nano",
@@ -33,9 +36,12 @@ export default async function handler(req, res) {
 
     const textResponse = response.choices[0].message.content;
 
+    // Debug log for AI response
+    console.log("AI response:", textResponse);
+
     res.status(200).json({ response: textResponse });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err instanceof Error ? err.message : err });
+    console.error("Backend error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 }

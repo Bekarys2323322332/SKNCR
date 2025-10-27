@@ -89,34 +89,54 @@ const ScanBar = () => {
   };
 
   const handleAnalysis = async () => {
-    if (!product?.ingredients_text) {
-      Alert.alert("Error", "No product components found.");
-      return;
-    }
+      if (!product?.ingredients_text) {
+        Alert.alert("Error", "No product components found.");
+        return;
+      }
 
-    const userData = await fetchUserData();
-    if (!userData) {
-      Alert.alert("Error", "User data not found.");
-      return;
-    }
+      const userData = await fetchUserData();
+      console.log("Fetched user data from Firebase:", userData);
 
-    try {
-      const response = await fetch(BACKEND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userData, productComponents: product.ingredients_text }),
-      });
+      if (!userData) {
+        Alert.alert("Error", "User data not found.");
+        return;
+      }
 
-      const data = await response.json();
-      console.log(data.response);
-      setAiResult(data.response);
-      await saveAnalysisDate();
-      setAlreadyAnalyzed(true);
-    } catch (err) {
-      console.error(err);
-      Alert.alert("Error", "Failed to get AI analysis.");
-    }
-  };
+      try {
+        const payload = {
+          userData,
+          productComponents: product.ingredients_text,
+        };
+        console.log("Sending payload to backend:", payload);
+
+        const response = await fetch(BACKEND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        // Use text first to debug JSON parsing issues
+        const text = await response.text();
+        console.log("Raw backend response:", text);
+
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (err) {
+          console.error("JSON parse error:", err);
+          Alert.alert("Error", "Invalid JSON response from backend");
+          return;
+        }
+
+        console.log("Parsed backend data:", data);
+        setAiResult(data.response);
+        await saveAnalysisDate();
+        setAlreadyAnalyzed(true);
+      } catch (err) {
+        console.error("Fetch error:", err);
+        Alert.alert("Error", "Failed to get AI analysis.");
+      }
+    };
 
   if (!permission) {
     return (
