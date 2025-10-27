@@ -16,7 +16,7 @@ const fetchProductInfo = async (barcode: string) => {
     return null;
   }
 };
-const BACKEND_URL = "https://my-backend.vercel.app";
+const BACKEND_URL = "https://skncr-5yv8.vercel.app/api/gemini";
 const fetchUserData = async () => {
   const user = auth.currentUser;
   if (!user) return null;
