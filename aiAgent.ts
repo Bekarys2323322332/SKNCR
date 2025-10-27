@@ -26,4 +26,3 @@ app.post("/gemini", async (req, res) => {
 });
 app.get("/api/hello", (_, res) => res.json({ message: "Hello from Vercel!" }));
 export default app;
-
