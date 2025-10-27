@@ -16,7 +16,7 @@ const fetchProductInfo = async (barcode: string) => {
     return null;
   }
 };
-
+const BACKEND_URL = "https://my-backend.vercel.app";
 const fetchUserData = async () => {
   const user = auth.currentUser;
   if (!user) return null;
@@ -99,7 +99,7 @@ const ScanBar = () => {
     }
 
     try {
-      const response = await fetch("http://10.70.107.207:3000/gemini", {
+      const response = await fetch(`${BACKEND_URL}/gemini`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

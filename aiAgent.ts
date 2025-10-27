@@ -1,12 +1,12 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import dotenv from "dotenv";
 import express from "express";
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const dotenv = require("dotenv");
+
 
 dotenv.config();
 const app = express();
 app.use(express.json());
-const apiKey = (process.env.API_KEY);
-const GenAi = new GoogleGenerativeAI(apiKey);
+const GenAi = new GoogleGenerativeAI(process.env.API_KEY || "");
 const model = GenAi.getGenerativeModel({model:"gemini-2.5-flash"});
 
 app.post("/gemini", async (req, res) => {
