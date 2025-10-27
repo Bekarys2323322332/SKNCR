@@ -16,8 +16,9 @@ const fetchProductInfo = async (barcode: string) => {
     return null;
   }
 };
-const [aiResult, setAiResult] = useState("");
+
 const BACKEND_URL = "https://skncr-5yv8.vercel.app/api/aiAgent";
+
 const fetchUserData = async () => {
   const user = auth.currentUser;
   if (!user) return null;
@@ -49,7 +50,7 @@ const checkAnalysisStatus = async (setAlreadyAnalyzed: (v: boolean) => void) => 
         lastDate.getMonth() === today.getMonth() &&
         lastDate.getFullYear() === today.getFullYear()
       ) {
-        setAlreadyAnalyzed(false);
+        setAlreadyAnalyzed(true);
       }
     }
   }
@@ -60,7 +61,7 @@ const ScanBar = () => {
   const [scanned, setScanned] = useState(false);
   const [product, setProduct] = useState<any>(null);
   const [alreadyAnalyzed, setAlreadyAnalyzed] = useState(false);
-  const [geminiResult, setGeminiResult] = useState("");
+  const [aiResult, setAiResult] = useState("");
   const cameraRef = useRef<any>(null);
   const scannedRef = useRef(false);
 
@@ -88,38 +89,34 @@ const ScanBar = () => {
   };
 
   const handleAnalysis = async () => {
-  if (!product?.ingredients_text) {
-    Alert.alert("Error", "No product components found.");
-    return;
-  }
+    if (!product?.ingredients_text) {
+      Alert.alert("Error", "No product components found.");
+      return;
+    }
 
-  const userData = await fetchUserData();
-  if (!userData) {
-    Alert.alert("Error", "User data not found.");
-    return;
-  }
+    const userData = await fetchUserData();
+    if (!userData) {
+      Alert.alert("Error", "User data not found.");
+      return;
+    }
 
-  try {
-    const response = await fetch(BACKEND_URL, { // your backend handles OpenAI now
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userData,
-        productComponents: product.ingredients_text,
-      }),
-    });
+    try {
+      const response = await fetch(BACKEND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userData, productComponents: product.ingredients_text }),
+      });
 
-    const data = await response.json();
-    console.log(data.response);
-    setAiResult(data.response);
-    await saveAnalysisDate();
-    setAlreadyAnalyzed(true);
-  } catch (err) {
-    console.error(err);
-    Alert.alert("Error", "Failed to get AI analysis.");
-  }
-};
-
+      const data = await response.json();
+      console.log(data.response);
+      setAiResult(data.response);
+      await saveAnalysisDate();
+      setAlreadyAnalyzed(true);
+    } catch (err) {
+      console.error(err);
+      Alert.alert("Error", "Failed to get AI analysis.");
+    }
+  };
 
   if (!permission) {
     return (
@@ -161,12 +158,7 @@ const ScanBar = () => {
           {product.image_url && (
             <Image
               source={{ uri: product.image_url }}
-              style={{
-                width: 150,
-                height: 150,
-                borderRadius: 8,
-                marginVertical: 8,
-              }}
+              style={{ width: 150, height: 150, borderRadius: 8, marginVertical: 8 }}
             />
           )}
           <Text>Brand: {product.brands}</Text>
@@ -178,9 +170,7 @@ const ScanBar = () => {
             disabled={alreadyAnalyzed || !product?.ingredients_text}
             style={{
               backgroundColor:
-                alreadyAnalyzed || !product?.ingredients_text
-                  ? "#9ca3af"
-                  : "#3b82f6",
+                alreadyAnalyzed || !product?.ingredients_text ? "#9ca3af" : "#3b82f6",
               padding: 12,
               borderRadius: 10,
               marginTop: 16,
@@ -198,7 +188,7 @@ const ScanBar = () => {
 
           {aiResult ? (
             <View className="mt-4">
-              <Text className="font-bold mb-1">AI Analysis:</Text>
+              <Text className="font-bold mb-1">AI Compatibility Analysis:</Text>
               <Text>{aiResult}</Text>
             </View>
           ) : null}
@@ -211,7 +201,7 @@ const ScanBar = () => {
             setScanned(false);
             scannedRef.current = false;
             setProduct(null);
-            setGeminiResult("");
+            setAiResult("");
           }}
           style={{
             backgroundColor: "#22c55e",
@@ -221,9 +211,7 @@ const ScanBar = () => {
             width: 200,
           }}
         >
-          <Text className="text-white text-center font-semibold">
-            Scan Again
-          </Text>
+          <Text className="text-white text-center font-semibold">Scan Again</Text>
         </TouchableOpacity>
       )}
     </View>
