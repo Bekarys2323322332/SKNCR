@@ -16,7 +16,8 @@ const fetchProductInfo = async (barcode: string) => {
     return null;
   }
 };
-const BACKEND_URL = "https://skncr-5yv8.vercel.app/gemini";
+const [aiResult, setAiResult] = useState("");
+const BACKEND_URL = "https://skncr-5yv8.vercel.app";
 const fetchUserData = async () => {
   const user = auth.currentUser;
   if (!user) return null;
@@ -87,34 +88,38 @@ const ScanBar = () => {
   };
 
   const handleAnalysis = async () => {
-    if (!product?.ingredients_text) {
-      Alert.alert("Error", "No product components found.");
-      return;
-    }
+  if (!product?.ingredients_text) {
+    Alert.alert("Error", "No product components found.");
+    return;
+  }
 
-    const userData = await fetchUserData();
-    if (!userData) {
-      Alert.alert("Error", "User data not found.");
-      return;
-    }
+  const userData = await fetchUserData();
+  if (!userData) {
+    Alert.alert("Error", "User data not found.");
+    return;
+  }
 
-    try {
-      const response = await fetch(`${BACKEND_URL}/gemini`, {
+  try {
+    const response = await fetch(BACKEND_URL, { // your backend handles OpenAI now
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userData, productComponents: product.ingredients_text }),
+      body: JSON.stringify({
+        userData,
+        productComponents: product.ingredients_text,
+      }),
     });
 
-      const data = await response.json();
-      console.log(data.response);
-      setGeminiResult(data.response);
-      await saveAnalysisDate();
-      setAlreadyAnalyzed(true);
-    } catch (err) {
-      console.error(err);
-      Alert.alert("Error", "Failed to get Gemini analysis.");
-    }
-  };
+    const data = await response.json();
+    console.log(data.response);
+    setAiResult(data.response);
+    await saveAnalysisDate();
+    setAlreadyAnalyzed(true);
+  } catch (err) {
+    console.error(err);
+    Alert.alert("Error", "Failed to get AI analysis.");
+  }
+};
+
 
   if (!permission) {
     return (
@@ -191,10 +196,10 @@ const ScanBar = () => {
             </Text>
           </TouchableOpacity>
 
-          {geminiResult ? (
+          {aiResult ? (
             <View className="mt-4">
-              <Text className="font-bold mb-1">Gemini Analysis:</Text>
-              <Text>{geminiResult}</Text>
+              <Text className="font-bold mb-1">AI Analysis:</Text>
+              <Text>{aiResult}</Text>
             </View>
           ) : null}
         </View>
