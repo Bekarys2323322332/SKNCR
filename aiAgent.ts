@@ -1,4 +1,4 @@
-const express = require("express");
+import express from "express";
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const dotenv = require("dotenv");
 
@@ -24,6 +24,6 @@ app.post("/gemini", async (req, res) => {
     res.status(500).json({ error: err instanceof Error ? err.message : err });
   }
 });
+app.get("/api/hello", (_, res) => res.json({ message: "Hello from Vercel!" }));
+export default app;
 
-const PORT = 3000;
-app.listen(3000, () => console.log("✅ Server running on port 3000"));
