@@ -17,7 +17,7 @@ const fetchProductInfo = async (barcode: string) => {
   }
 };
 const [aiResult, setAiResult] = useState("");
-const BACKEND_URL = "https://skncr-5yv8.vercel.app";
+const BACKEND_URL = "https://skncr-5yv8.vercel.app/api/aiAgent";
 const fetchUserData = async () => {
   const user = auth.currentUser;
   if (!user) return null;
