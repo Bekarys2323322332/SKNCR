@@ -16,7 +16,7 @@ const fetchProductInfo = async (barcode: string) => {
     return null;
   }
 };
-const BACKEND_URL = "https://skncr-5yv8.vercel.app/api/gemini";
+const BACKEND_URL = "https://skncr-5yv8.vercel.app/gemini";
 const fetchUserData = async () => {
   const user = auth.currentUser;
   if (!user) return null;
@@ -100,15 +100,13 @@ const ScanBar = () => {
 
     try {
       const response = await fetch(`${BACKEND_URL}/gemini`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userData,
-          productComponents: product.ingredients_text,
-        }),
-      });
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userData, productComponents: product.ingredients_text }),
+    });
 
       const data = await response.json();
+      console.log(data.response);
       setGeminiResult(data.response);
       await saveAnalysisDate();
       setAlreadyAnalyzed(true);

@@ -19,8 +19,11 @@ app.post("/gemini", async (req, res) => {
     Give a compatibility score (0–100) and explain briefly why.
     `;
     const result = await model.generateContent(prompt);
-    res.json({ response: result.response.text() });
-} catch (err) {
+
+    const textResponse = result.response.text();
+
+    res.json({ response: textResponse });
+  } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : err });
   }
 });
