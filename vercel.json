@@ -1,8 +1,5 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "src/aiAgent.ts", "use": "@vercel/node" }
-  ],
+  "version": 3,
   "routes": [
     { "src": "/(.*)", "dest": "src/aiAgent.ts" }
   ]
