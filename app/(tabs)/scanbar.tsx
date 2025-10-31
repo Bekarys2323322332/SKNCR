@@ -109,7 +109,7 @@ const ScanBar = () => {
         };
         console.log("Sending payload to backend:", payload);
 
-        const response = await fetch("https://skncr.vercel.app/api/gemini", {
+        const response = await fetch("https://skncr-2e88ewa3p-bekarys2323322332s-projects.vercel.app/api/aiAgent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
