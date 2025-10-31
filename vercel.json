@@ -1,6 +1,8 @@
 {
   "version": 3,
-  "routes": [
-    { "src": "/(.*)", "dest": "src/aiAgent.ts" }
-  ]
+  "functions": {
+    "api/**/*.ts": {
+      "runtime": "nodejs20.x"
+    }
+  }
 }
