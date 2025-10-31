@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Button, Image, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Button, Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { auth, db } from "../utils/firebaseConfig"; // adjust path
 
 const fetchProductInfo = async (barcode: string) => {
@@ -156,6 +156,7 @@ const ScanBar = () => {
   }
 
   return (
+    <ScrollView style={{flex:1, backgroundColor: 'white' }} showsVerticalScrollIndicator={false}>
     <View className="flex-1 items-center justify-start bg-white">
       <CameraView
         ref={cameraRef}
@@ -235,6 +236,7 @@ const ScanBar = () => {
         </TouchableOpacity>
       )}
     </View>
+  </ScrollView>
   );
 };
 
