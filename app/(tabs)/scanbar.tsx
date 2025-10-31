@@ -109,11 +109,12 @@ const ScanBar = () => {
         };
         console.log("Sending payload to backend:", payload);
 
-        const response = await fetch(BACKEND_URL, {
+        const response = await fetch("https://skncr.vercel.app/api/gemini", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
+
 
         // Use text first to debug JSON parsing issues
         const text = await response.text();
