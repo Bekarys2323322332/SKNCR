@@ -7,11 +7,12 @@
       "@/*": ["./*"]
     },
     "target": "ES2020",
-    "module": "esnext",           // ✅ use esnext or es2015
-    "moduleResolution": "bundler", // ✅ use bundler
+    "module": "esnext",          
+    "moduleResolution": "bundler", 
     "esModuleInterop": true,
     "strict": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "rootDir": "./"
   },
   "include": [
     "**/*.ts",
