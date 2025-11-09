@@ -111,7 +111,7 @@ export default function UVIndexPanel() {
         <Text style={styles.errorText}>Error: {error}</Text>
         <TouchableOpacity
           style={styles.retryButton}
-          onPress={() => fetchUVData(location.latitude, location.longitude)}
+          onPress={() => location ? fetchUVData(location.latitude, location.longitude) : getUserLocation()}
         >
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
