@@ -5,7 +5,7 @@ import { router } from "expo-router";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -177,8 +177,8 @@ const Profile = () => {
 
   if (!user) {
     return (
-      <View className="flex-1 justify-center items-center bg-white">
-        <ActivityIndicator size="large" color="#8b5cf6" />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'white' }}>
+        <ActivityIndicator size="large" color="#5C6BC0" />
       </View>
     );
   }
@@ -198,42 +198,39 @@ const Profile = () => {
 
   return (
     <View style={{ flex: 1 }}>
-          <ScrollView style={{flex:1, backgroundColor: 'white' }} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View className="flex-row justify-between items-center px-5 py-4">
-          <TouchableOpacity
-                    onPress={() => setShowSettings(true)}
-                    style={{
-                      position: 'absolute',
-                      top: 50,
-                      right: 20,
-                      zIndex: 10,
-                      padding: 8,
-                      backgroundColor: '#f3f4f6',
-                      borderRadius: 8
-                    }}
-                  >
-                    <Ionicons name="settings" size={24} color="#374151" />
-                  </TouchableOpacity>
-        </View>
-       
+      <ScrollView style={{ flex: 1, backgroundColor: 'white' }} showsVerticalScrollIndicator={false}>
+        <TouchableOpacity
+          onPress={() => setShowSettings(true)}
+          style={{
+            position: 'absolute',
+            top: 50,
+            right: 20,
+            zIndex: 10,
+            padding: 8,
+            backgroundColor: '#f3f4f6',
+            borderRadius: 8
+          }}
+        >
+          <Ionicons name="settings" size={24} color="#374151" />
+        </TouchableOpacity>
+
         {/* Profile Info */}
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, paddingTop: 20, marginTop: 80 }}>
           <TouchableOpacity onPress={showImageOptions} disabled={uploading}>
-            <View className="relative">
+            <View style={{ position: 'relative' }}>
               {profilePic ? (
                 <Image
                   source={{ uri: profilePic }}
-                  className="w-24 h-24 rounded-full bg-gray-500"
+                  style={{ width: 96, height: 96, borderRadius: 48, backgroundColor: '#e5e7eb' }}
                 />
               ) : (
-                <View className="w-24 h-24 rounded-full bg-gray-500 justify-center items-center">
-                  <Text className="text-3xl text-white font-bold">
+                <View style={{ width: 96, height: 96, borderRadius: 48, backgroundColor: '#e5e7eb', justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 36, color: 'white', fontWeight: 'bold' }}>
                     {user.displayName?.[0] || user.email?.[0] || "U"}
                   </Text>
                 </View>
               )}
-              <View className="absolute bottom-0 right-0 bg-purple-500 rounded-full p-1.5">
+              <View style={{ position: 'absolute', bottom: 0, right: 0, backgroundColor: '#5C6BC0', borderRadius: 16, padding: 6 }}>
                 {uploading ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
@@ -242,41 +239,53 @@ const Profile = () => {
               </View>
             </View>
           </TouchableOpacity>
-          <Text className="text-xl font-bold mt-3">
+          <Text style={{ fontSize: 20, fontWeight: '600', color: '#374151', marginTop: 12 }}>
             {displayName}
           </Text>
-          <Text className="text-sm text-gray-500 mt-1">{user.email}</Text>
+          <Text style={{ fontSize: 14, color: '#6B7280', marginTop: 4 }}>{user.email}</Text>
         </View>
 
         {/* Achievements - Horizontal Scroll */}
-        <View className="mb-6">
-          <Text className="text-base font-semibold mb-3 px-5">Achievements</Text>
+        <View style={{ marginBottom: 24, marginTop: 24 }}>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151', marginBottom: 12, paddingHorizontal: 16 }}>
+            Achievements
+          </Text>
           <ScrollView 
             horizontal 
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 20 }}
+            contentContainerStyle={{ paddingHorizontal: 16 }}
           >
             {achievements.map((item, idx) => (
-              <View key={idx} className="items-center mr-5">
-                <View className="w-16 h-16 rounded-full bg-purple-100 justify-center items-center mb-2">
-                  <Ionicons name={item.icon as any} size={28} color="#8b5cf6" />
+              <View key={idx} style={{ alignItems: 'center', marginRight: 20 }}>
+                <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name={item.icon as any} size={28} color="#5C6BC0" />
                 </View>
-                <Text className="text-xs font-medium text-center w-20">{item.label}</Text>
-                <Text className="text-xs text-gray-400 text-center">{item.sub}</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#374151', textAlign: 'center', width: 80 }}>
+                  {item.label}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>{item.sub}</Text>
               </View>
             ))}
           </ScrollView>
         </View>
 
-          {/* My Skincare Plan */}
-        <View className="px-5 mb-6">
+        {/* My Skincare Plan */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 24 }}>
           <TouchableOpacity
-            className="flex-row justify-between items-center bg-gray-900 rounded-2xl p-4 mb-3"
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              backgroundColor: '#374151',
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 12,
+            }}
             onPress={() => setShowPlanExpanded(!showPlanExpanded)}
           >
-            <View className="flex-row items-center">
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Ionicons name="calendar-outline" size={20} color="#fff" />
-              <Text className="text-white font-semibold ml-2">My Skincare Plan</Text>
+              <Text style={{ color: 'white', fontWeight: '600', marginLeft: 8 }}>My Skincare Plan</Text>
             </View>
             <Ionicons
               name={showPlanExpanded ? "chevron-up" : "chevron-down"}
@@ -286,117 +295,139 @@ const Profile = () => {
           </TouchableOpacity>
 
           {showPlanExpanded && plan?.routine && (
-            <View className="space-y-3">
+            <View style={{ gap: 12 }}>
               {/* Morning */}
-              <View className="bg-gray-50 rounded-xl p-3">
-                <View className="flex-row items-center mb-2">
+              <View style={{ backgroundColor: '#f3f4f6', borderRadius: 12, padding: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                   <Ionicons name="sunny-outline" size={18} color="#f59e0b" />
-                  <Text className="font-semibold ml-2">Morning</Text>
+                  <Text style={{ fontWeight: '600', color: '#374151', marginLeft: 8 }}>Morning</Text>
                 </View>
                 {plan.routine.morning?.map((product: string, idx: number) => (
-                  <View key={idx} className="flex-row items-center py-2 px-3 bg-white rounded-lg mb-2">
-                    <View className="w-8 h-8 rounded-lg bg-purple-100 justify-center items-center mr-3">
-                      <Ionicons name="water" size={16} color="#8b5cf6" />
+                  <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: 'white', borderRadius: 8, marginBottom: 8 }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                      <Ionicons name="water" size={16} color="#5C6BC0" />
                     </View>
-                    <View className="flex-1">
-                      <Text className="text-sm font-medium">{product}</Text>
-                      <Text className="text-xs text-gray-500">Morning</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>{product}</Text>
+                      <Text style={{ fontSize: 12, color: '#6B7280' }}>Morning</Text>
                     </View>
                   </View>
                 ))}
                 {plan.routine.spf && (
-                  <View className="flex-row items-center py-2 px-3 bg-yellow-50 rounded-lg">
-                    <View className="w-8 h-8 rounded-lg bg-yellow-200 justify-center items-center mr-3">
+                  <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: '#fef3c7', borderRadius: 8 }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#fde68a', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
                       <Ionicons name="sunny" size={16} color="#92400e" />
                     </View>
-                    <View className="flex-1">
-                      <Text className="text-sm font-medium">{plan.routine.spf}</Text>
-                      <Text className="text-xs text-yellow-800">Morning</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>{plan.routine.spf}</Text>
+                      <Text style={{ fontSize: 12, color: '#92400e' }}>Morning</Text>
                     </View>
                   </View>
                 )}
               </View>
 
               {/* Evening */}
-              <View className="bg-gray-50 rounded-xl p-3">
-                <View className="flex-row items-center mb-2">
-                  <Ionicons name="moon-outline" size={18} color="#4f46e5" />
-                  <Text className="font-semibold ml-2">Evening</Text>
+              <View style={{ backgroundColor: '#f3f4f6', borderRadius: 12, padding: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                  <Ionicons name="moon-outline" size={18} color="#5C6BC0" />
+                  <Text style={{ fontWeight: '600', color: '#374151', marginLeft: 8 }}>Evening</Text>
                 </View>
                 {plan.routine.evening?.map((product: string, idx: number) => (
-                  <View key={idx} className="flex-row items-center py-2 px-3 bg-white rounded-lg mb-2">
-                    <View className="w-8 h-8 rounded-lg bg-purple-100 justify-center items-center mr-3">
-                      <Ionicons name="moon" size={16} color="#8b5cf6" />
+                  <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: 'white', borderRadius: 8, marginBottom: 8 }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                      <Ionicons name="moon" size={16} color="#5C6BC0" />
                     </View>
-                    <View className="flex-1">
-                      <Text className="text-sm font-medium">{product}</Text>
-                      <Text className="text-xs text-gray-500">Evening</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '500', color: '#374151' }}>{product}</Text>
+                      <Text style={{ fontSize: 12, color: '#6B7280' }}>Evening</Text>
                     </View>
                   </View>
                 ))}
               </View>
             </View>
           )}
-       {/* Personalized Tips - Toggleable */}
-        {plan?.routine.tips && (
-          <View className="px-5 mb-6">
-            <TouchableOpacity
-              className="flex-row justify-between items-center bg-purple-100 rounded-2xl p-4 mb-3"
-              onPress={() => setShowTipsExpanded(!showTipsExpanded)}
-            >
-              <View className="flex-row items-center">
-                <Ionicons name="bulb-outline" size={20} color="#8b5cf6" />
-                <Text className="text-purple-900 font-semibold ml-2">Personalized Tips</Text>
-              </View>
-              <Ionicons
-                name={showTipsExpanded ? "chevron-up" : "chevron-down"}
-                size={20}
-                color="#8b5cf6"
-              />
-            </TouchableOpacity>
 
-            {showTipsExpanded && (
-              <View className="bg-purple-50 rounded-xl p-4 space-y-3">
-                {plan.routine.tips.map((tip: string, idx: number) => (
-                  <View key={idx} className="flex-row items-start mb-3">
-                    <View className="w-6 h-6 rounded-full bg-purple-200 justify-center items-center mr-3 mt-0.5">
-                      <Ionicons name="checkmark" size={14} color="#8b5cf6" />
+          {/* Personalized Tips - Toggleable */}
+          {plan?.routine.tips && (
+            <View style={{ marginTop: 12 }}>
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  backgroundColor: '#e0e7ff',
+                  borderRadius: 12,
+                  padding: 16,
+                  marginBottom: 12,
+                }}
+                onPress={() => setShowTipsExpanded(!showTipsExpanded)}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="bulb-outline" size={20} color="#5C6BC0" />
+                  <Text style={{ color: '#374151', fontWeight: '600', marginLeft: 8 }}>Personalized Tips</Text>
+                </View>
+                <Ionicons
+                  name={showTipsExpanded ? "chevron-up" : "chevron-down"}
+                  size={20}
+                  color="#5C6BC0"
+                />
+              </TouchableOpacity>
+
+              {showTipsExpanded && (
+                <View style={{ backgroundColor: '#f3f4f6', borderRadius: 12, padding: 16, gap: 12 }}>
+                  {plan.routine.tips.map((tip: string, idx: number) => (
+                    <View key={idx} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 }}>
+                      <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#e0e7ff', justifyContent: 'center', alignItems: 'center', marginRight: 12, marginTop: 2 }}>
+                        <Ionicons name="checkmark" size={14} color="#5C6BC0" />
+                      </View>
+                      <Text style={{ fontSize: 14, color: '#374151', flex: 1, lineHeight: 20 }}>{tip}</Text>
                     </View>
-                    <Text className="text-sm text-gray-700 flex-1">{tip}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-        )}
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
           {!plan && (
             <TouchableOpacity
-              className="bg-purple-100 py-3 rounded-xl"
+              style={{ backgroundColor: '#e0e7ff', paddingVertical: 12, borderRadius: 12, marginTop: 12 }}
               onPress={() => router.push("../(auth)/Skincare")}
             >
-              <Text className="text-purple-700 text-center text-sm font-semibold">
+              <Text style={{ color: '#5C6BC0', textAlign: 'center', fontSize: 14, fontWeight: '600' }}>
                 Create a Plan
               </Text>
             </TouchableOpacity>
           )}
-         
         </View>
 
         {/* Recommended Brands - Horizontal Scroll */}
         {allBrands.length > 0 && (
-          <View className="mb-6">
-            <Text className="text-base font-semibold mb-3 px-5">Recommended Brands</Text>
+          <View style={{ marginBottom: 24 }}>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151', marginBottom: 12, paddingHorizontal: 16 }}>
+              Recommended Brands
+            </Text>
             <ScrollView 
               horizontal 
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 20 }}
+              contentContainerStyle={{ paddingHorizontal: 16 }}
             >
               {allBrands.map((brand: string, idx: number) => (
                 <View 
                   key={idx} 
-                  className="bg-gray-900 rounded-xl p-4 mr-3 w-24 h-24 justify-center items-center"
+                  style={{
+                    backgroundColor: '#374151',
+                    borderRadius: 12,
+                    padding: 16,
+                    marginRight: 12,
+                    width: 96,
+                    height: 96,
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}
                 >
-                  <Text className="text-white text-xs font-medium text-center">{brand}</Text>
+                  <Text style={{ color: 'white', fontSize: 12, fontWeight: '500', textAlign: 'center' }}>
+                    {brand}
+                  </Text>
                 </View>
               ))}
             </ScrollView>
@@ -413,57 +444,56 @@ const Profile = () => {
         visible={showSettings}
         onRequestClose={() => setShowSettings(false)}
       >
-        <View className="flex-1 justify-center items-center bg-black/50">
-          <View className="bg-white p-5 rounded-xl w-4/5">
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <View style={{ backgroundColor: 'white', padding: 20, borderRadius: 12, width: '80%', alignItems: 'center' }}>
             {/* Close X Button */}
             <TouchableOpacity
               onPress={() => setShowSettings(false)}
-              className="absolute top-4 right-4 z-10"
+              style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}
             >
-              <Ionicons name="close" size={24} color="#000" />
+              <Ionicons name="close" size={24} color="#374151" />
             </TouchableOpacity>
 
-            <Text className="text-2xl font-bold mb-6 text-center">Settings</Text>
+            <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>Settings</Text>
             
             {/* Dark Mode */}
-            <View className="flex-row items-center justify-between w-full mb-4 pb-4 border-b border-gray-200">
-              <View className="flex-row items-center">
-                <Ionicons name="moon-outline" size={22} color="#8b5cf6" />
-                <Text className="text-base ml-3">Dark Mode</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="moon-outline" size={22} color="#5C6BC0" />
+                <Text style={{ fontSize: 16, color: '#374151', marginLeft: 12 }}>Dark Mode</Text>
               </View>
               <Switch
                 value={darkMode}
                 onValueChange={setDarkMode}
-                trackColor={{ false: '#767577', true: '#8b5cf6' }}
+                trackColor={{ false: '#767577', true: '#5C6BC0' }}
                 thumbColor={darkMode ? '#ffffff' : '#f4f3f4'}
               />
             </View>
             
-            
             {/* Notifications */}
             <TouchableOpacity 
-              className="flex-row items-center justify-between w-full mb-4 pb-4 border-b border-gray-200"
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}
               onPress={() => {
                 Alert.alert("Notifications", "Notification settings coming soon!");
               }}
             >
-              <View className="flex-row items-center">
-                <Ionicons name="notifications-outline" size={22} color="#8b5cf6" />
-                <Text className="text-base ml-3">Notifications</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="notifications-outline" size={22} color="#5C6BC0" />
+                <Text style={{ fontSize: 16, color: '#374151', marginLeft: 12 }}>Notifications</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
             </TouchableOpacity>
 
             {/* Privacy Policy */}
             <TouchableOpacity 
-              className="flex-row items-center justify-between w-full mb-6 pb-4 border-b border-gray-200"
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}
               onPress={() => {
                 Alert.alert("Privacy Policy", "Privacy policy coming soon!");
               }}
             >
-              <View className="flex-row items-center">
-                <Ionicons name="shield-checkmark-outline" size={22} color="#8b5cf6" />
-                <Text className="text-base ml-3">Privacy Policy</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="shield-checkmark-outline" size={22} color="#5C6BC0" />
+                <Text style={{ fontSize: 16, color: '#374151', marginLeft: 12 }}>Privacy Policy</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
             </TouchableOpacity>
@@ -474,10 +504,10 @@ const Profile = () => {
                 setShowSettings(false);
                 setTimeout(handleResetPlan, 300);
               }}
-              className="flex-row items-center justify-center bg-red-100 py-3 px-5 rounded-lg mb-3 w-full"
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fee2e2', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, marginBottom: 12, width: '100%' }}
             >
               <Ionicons name="refresh-outline" size={18} color="#dc2626" />
-              <Text className="text-red-600 font-semibold ml-2">Reset My Plan</Text>
+              <Text style={{ color: '#dc2626', fontWeight: '600', marginLeft: 8 }}>Reset My Plan</Text>
             </TouchableOpacity>
 
             {/* Sign Out */}
@@ -486,10 +516,10 @@ const Profile = () => {
                 setShowSettings(false);
                 setTimeout(handleSignOut, 300);
               }}
-              className="flex-row items-center justify-center bg-purple-600 py-3 px-5 rounded-lg w-full"
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#5C6BC0', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, width: '100%' }}
             >
               <Ionicons name="exit-outline" size={18} color="#fff" />
-              <Text className="text-white font-semibold ml-2">Sign Out</Text>
+              <Text style={{ color: 'white', fontWeight: '600', marginLeft: 8 }}>Sign Out</Text>
             </TouchableOpacity>
           </View>
         </View>

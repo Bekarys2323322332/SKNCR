@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { auth, db } from "../utils/firebaseConfig"; // adjust path
 const fetchProductInfo = async (barcode: string) => {
@@ -136,115 +136,122 @@ const ScanBar = () => {
 
   if (!permission) {
     return (
-      <View className="flex-1 justify-center items-center bg-white">
-        <Text>Requesting camera permission...</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'white' }}>
+        <Text style={{ fontSize: 16, color: '#374151' }}>Requesting camera permission...</Text>
       </View>
     );
   }
 
   if (!permission.granted) {
     return (
-      <View className="flex-1 justify-center items-center bg-white">
-        <Text>No camera access</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'white', paddingHorizontal: 16 }}>
+        <Text style={{ fontSize: 16, color: '#374151', marginBottom: 16 }}>No camera access</Text>
         <Button title="Allow Camera" onPress={requestPermission} />
       </View>
     );
   }
 
   return (
-    <ScrollView style={{flex:1, backgroundColor: 'white' }} showsVerticalScrollIndicator={false}>
-    <View className="flex-1 items-center justify-start bg-white">
-      <CameraView
-        ref={cameraRef}
-        style={{
-          width: "90%",
-          height: 200,
-          marginTop: "20%",
-          borderRadius: 16,
-          overflow: "hidden",
-        }}
-        barcodeScannerSettings={{
-          barcodeTypes: ["ean13", "code128"],
-        }}
-        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-      />
-
-      {product && (
-        <View className="p-4 items-center">
-          <Text className="text-lg font-bold">{product.product_name}</Text>
-          {product.image_url && (
-            <Image
-              source={{ uri: product.image_url }}
-              style={{ width: 150, height: 150, borderRadius: 8, marginVertical: 8 }}
+    <View style={{ flex: 1 }}>
+      <ScrollView style={{ flex: 1, backgroundColor: 'white' }} showsVerticalScrollIndicator={false}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-start', backgroundColor: 'white', paddingHorizontal: 16 }}>
+          <View style={{ marginTop: 80, width: '100%', alignItems: 'center' }}>
+            <CameraView
+              ref={cameraRef}
+              style={{
+                width: "90%",
+                height: 200,
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+              barcodeScannerSettings={{
+                barcodeTypes: ["ean13", "code128"],
+              }}
+              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
             />
-          )}
-          <Text>Brand: {product.brands}</Text>
-          <Text className="mt-2 font-semibold">Ingredients:</Text>
-          <Text>{product.ingredients_text || "No info"}</Text>
+          </View>
 
-          <TouchableOpacity
-            onPress={handleAnalysis}
-            disabled={ !product?.ingredients_text}
-            style={{
-              backgroundColor:
-              !product?.ingredients_text ? "#3b82f6" : "#9ca3af",
-              padding: 12,
-              borderRadius: 10,
-              marginTop: 16,
-              width: 250,
-            }}
-          >
-            {/*<TouchableOpacity
-            onPress={handleAnalysis}
-            disabled={alreadyAnalyzed || !product?.ingredients_text}
-            style={{
-              backgroundColor:
-                alreadyAnalyzed || !product?.ingredients_text ? "#9ca3af" : "#3b82f6",
-              padding: 12,
-              borderRadius: 10,
-              marginTop: 16,
-              width: 250,
-            }}
-          >*/}
-            <Text className="text-white text-center font-semibold">
-              {alreadyAnalyzed
-                ? "You already analyzed today"
-                : !product?.ingredients_text
-                ? "No components found"
-                : "Get Compatibility Score"}
-            </Text>
-          </TouchableOpacity>
+          {product && (
+            <View style={{ padding: 16, alignItems: 'center', width: '100%', marginTop: 24 }}>
+              <Text style={{ fontSize: 18, fontWeight: '600', color: '#374151', marginBottom: 8, textAlign: 'center' }}>
+                {product.product_name}
+              </Text>
+              {product.image_url && (
+                <Image
+                  source={{ uri: product.image_url }}
+                  style={{ width: 150, height: 150, borderRadius: 8, marginVertical: 8 }}
+                  resizeMode="cover"
+                />
+              )}
+              <Text style={{ fontSize: 14, color: '#6B7280', marginBottom: 8 }}>Brand: {product.brands}</Text>
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#374151', marginTop: 8, marginBottom: 4 }}>
+                Ingredients:
+              </Text>
+              <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 16 }}>
+                {product.ingredients_text || "No info"}
+              </Text>
 
-          {aiResult ? (
-            <View className="mt-4">
-              <Text className="font-bold mb-1">AI Compatibility Analysis:</Text>
-              <Text>{aiResult}</Text>
+              <TouchableOpacity
+                onPress={handleAnalysis}
+                disabled={!product?.ingredients_text}
+                style={{
+                  backgroundColor: !product?.ingredients_text ? '#9ca3af' : '#5C6BC0',
+                  padding: 16,
+                  borderRadius: 12,
+                  marginTop: 8,
+                  width: '80%',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: !product?.ingredients_text ? 0.5 : 1,
+                }}
+              >
+                <Text style={{ color: 'white', fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
+                  {alreadyAnalyzed
+                    ? "You already analyzed today"
+                    : !product?.ingredients_text
+                    ? "No components found"
+                    : "Get Compatibility Score"}
+                </Text>
+              </TouchableOpacity>
+
+              {aiResult ? (
+                <View style={{ marginTop: 24, width: '100%', backgroundColor: '#f3f4f6', borderRadius: 12, padding: 16 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
+                    AI Compatibility Analysis:
+                  </Text>
+                  <Text style={{ fontSize: 14, color: '#6B7280', lineHeight: 20 }}>{aiResult}</Text>
+                </View>
+              ) : null}
             </View>
-          ) : null}
-        </View>
-      )}
+          )}
 
-      {scanned && (
-        <TouchableOpacity
-          onPress={() => {
-            setScanned(false);
-            scannedRef.current = false;
-            setProduct(null);
-            setAiResult("");
-          }}
-          style={{
-            backgroundColor: "#22c55e",
-            padding: 12,
-            borderRadius: 10,
-            marginTop: 24,
-            width: 200,
-          }}
-        >
-          <Text className="text-white text-center font-semibold">Scan Again</Text>
-        </TouchableOpacity>
-      )}
+          {scanned && (
+            <TouchableOpacity
+              onPress={() => {
+                setScanned(false);
+                scannedRef.current = false;
+                setProduct(null);
+                setAiResult("");
+              }}
+              style={{
+                backgroundColor: "#5C6BC0",
+                padding: 16,
+                borderRadius: 12,
+                marginTop: 24,
+                marginBottom: 40,
+                width: '80%',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
+                Scan Again
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </ScrollView>
     </View>
-  </ScrollView>
   );
 };
 
