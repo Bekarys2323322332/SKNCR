@@ -175,7 +175,7 @@ const questions: Question[] = [
     title: 'How would you describe your lifestyle?',
     subtitle: 'This helps us recommend the right products',
     icon: <Ionicons name="walk" size={26} color="#3b82f6" />,
-    type: 'multiple',
+    type: 'single',
     options: ['Sedentary', 'Moderately Active', 'Very Active', 'Outdoor Activities']
   },
   {

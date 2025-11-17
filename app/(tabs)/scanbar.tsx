@@ -3,7 +3,6 @@ import { doc, getDoc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Button, Image, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { auth, db } from "../utils/firebaseConfig"; // adjust path
-
 const fetchProductInfo = async (barcode: string) => {
   try {
     const res = await fetch(
@@ -50,7 +49,7 @@ const checkAnalysisStatus = async (setAlreadyAnalyzed: (v: boolean) => void) => 
         lastDate.getMonth() === today.getMonth() &&
         lastDate.getFullYear() === today.getFullYear()
       ) {
-        setAlreadyAnalyzed(true);
+        setAlreadyAnalyzed(false);
       }
     }
   }
@@ -89,55 +88,51 @@ const ScanBar = () => {
   };
 
   const handleAnalysis = async () => {
-      if (!product?.ingredients_text) {
-        Alert.alert("Error", "No product components found.");
-        return;
-      }
+  if (!product?.ingredients_text) {
+    Alert.alert("Error", "No product components found.");
+    return;
+  }
 
-      const userData = await fetchUserData();
-      console.log("Fetched user data from Firebase:", userData);
+  const userData = await fetchUserData();
+  console.log("Fetched user data from Firebase:", userData);
 
-      if (!userData) {
-        Alert.alert("Error", "User data not found.");
-        return;
-      }
+  if (!userData) {
+    Alert.alert("Error", "User data not found.");
+    return;
+  }
+  try {
+      const response = await fetch(
+      "https://marti-phytological-fidela.ngrok-free.dev/compatibility",
+      {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+      concerns: userData || [], // array is fine now
+      product_name: product.product_name || "",
+      product_ingredients: product.ingredients_text || ""
+    })
 
-      try {
-        const payload = {
-          userData,
-          productComponents: product.ingredients_text,
-        };
-        console.log("Sending payload to backend:", payload);
+    });
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
 
-        const response = await fetch("http://localhost:8081", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+    const data = await response.json();
 
+    // Expecting: { compatibility_score: 85, explanation: "..." }
+    const score = data.compatibility_score;
+    const explanation = data.explanation || "No explanation provided.";
 
-        // Use text first to debug JSON parsing issues
-        const text = await response.text();
-        console.log("Raw backend response:", text);
+    setAiResult(`Score: ${score}/100\n\nExpert explanation:\n${explanation}`);
 
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (err) {
-          console.error("JSON parse error:", err);
-          Alert.alert("Error", "Invalid JSON response from backend");
-          return;
-        }
+    await saveAnalysisDate(); // mark analyzed today
+    setAlreadyAnalyzed(false);
+  } catch (err) {
+    console.error("Error fetching compatibility:", err);
+    Alert.alert("Error", "Could not fetch compatibility score.");
+  }
+};
 
-        console.log("Parsed backend data:", data);
-        setAiResult(data.response);
-        await saveAnalysisDate();
-        setAlreadyAnalyzed(true);
-      } catch (err) {
-        console.error("Fetch error:", err);
-        Alert.alert("Error", "Failed to get AI analysis.");
-      }
-    };
 
   if (!permission) {
     return (
@@ -189,6 +184,18 @@ const ScanBar = () => {
 
           <TouchableOpacity
             onPress={handleAnalysis}
+            disabled={ !product?.ingredients_text}
+            style={{
+              backgroundColor:
+              !product?.ingredients_text ? "#3b82f6" : "#9ca3af",
+              padding: 12,
+              borderRadius: 10,
+              marginTop: 16,
+              width: 250,
+            }}
+          >
+            {/*<TouchableOpacity
+            onPress={handleAnalysis}
             disabled={alreadyAnalyzed || !product?.ingredients_text}
             style={{
               backgroundColor:
@@ -198,7 +205,7 @@ const ScanBar = () => {
               marginTop: 16,
               width: 250,
             }}
-          >
+          >*/}
             <Text className="text-white text-center font-semibold">
               {alreadyAnalyzed
                 ? "You already analyzed today"

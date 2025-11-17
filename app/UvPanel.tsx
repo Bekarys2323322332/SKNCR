@@ -25,8 +25,6 @@ export default function UVIndexPanel() {
     name: string;
   } | null>(null);
 
-  const [customLat, setCustomLat] = useState('');
-  const [customLon, setCustomLon] = useState('');
 
   useEffect(() => {
     getUserLocation(); // 👈 fetch device location first
@@ -162,23 +160,7 @@ export default function UVIndexPanel() {
         </View>
       </View>
 
-      {/* UV Scale */}
-      <View style={styles.scaleContainer}>
-        <View style={styles.scaleBar}>
-          <View style={[styles.scaleSegment, { backgroundColor: '#22c55e' }]} />
-          <View style={[styles.scaleSegment, { backgroundColor: '#eab308' }]} />
-          <View style={[styles.scaleSegment, { backgroundColor: '#f97316' }]} />
-          <View style={[styles.scaleSegment, { backgroundColor: '#ef4444' }]} />
-          <View style={[styles.scaleSegment, { backgroundColor: '#9333ea' }]} />
-        </View>
-        <View style={styles.scaleLabels}>
-          <Text style={styles.scaleLabel}>0-2</Text>
-          <Text style={styles.scaleLabel}>3-5</Text>
-          <Text style={styles.scaleLabel}>6-7</Text>
-          <Text style={styles.scaleLabel}>8-10</Text>
-          <Text style={styles.scaleLabel}>11+</Text>
-        </View>
-      </View>
+     
 
       {/* Protection Advice */}
       <View style={styles.adviceContainer}>
@@ -191,16 +173,12 @@ export default function UVIndexPanel() {
       {/* Location Info */}
       <View style={styles.locationInfo}>
         <Text style={styles.locationName}>{location.name}</Text>
-        <Text style={styles.locationCoords}>
-          Lat: {location.latitude.toFixed(4)}, Lon:{' '}
-          {location.longitude.toFixed(4)}
-        </Text>
         <Text style={styles.timestamp}>
           Last updated: {new Date().toLocaleTimeString()}
         </Text>
       </View>
 
-      
+  
     </ScrollView>
   );
 }
