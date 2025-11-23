@@ -15,6 +15,7 @@ export const savePlan = async (plan: any) => {
   }
 };
 
+
 export const loadPlan = async () => {
   const user = auth.currentUser;
 
@@ -39,4 +40,34 @@ export const resetPlan = async () => {
     const userRef = doc(db, "users", user.uid);
     await updateDoc(userRef, { skincarePlan: deleteField() });
   }
+};
+
+// Dark mode utilities
+const DARK_MODE_KEY = "darkMode";
+
+export const saveDarkMode = async (enabled: boolean) => {
+  await AsyncStorage.setItem(DARK_MODE_KEY, JSON.stringify(enabled));
+  
+  // Save to Firestore if user is logged in
+  const user = auth.currentUser;
+  if (user) {
+    const userRef = doc(db, "users", user.uid);
+    await setDoc(userRef, { darkMode: enabled }, { merge: true });
+  }
+};
+
+export const loadDarkMode = async (): Promise<boolean> => {
+  const user = auth.currentUser;
+
+  if (user) {
+    const userRef = doc(db, "users", user.uid);
+    const docSnap = await getDoc(userRef);
+    if (docSnap.exists() && docSnap.data().darkMode !== undefined) {
+      return docSnap.data().darkMode as boolean;
+    }
+  }
+
+  // Fallback to local storage
+  const saved = await AsyncStorage.getItem(DARK_MODE_KEY);
+  return saved ? JSON.parse(saved) : false;
 };

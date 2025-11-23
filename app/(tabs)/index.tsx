@@ -1,13 +1,16 @@
 import { auth, db } from '@/app/utils/firebaseConfig';
+import { loadDarkMode } from '@/app/utils/storage';
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { differenceInCalendarDays, eachDayOfInterval, endOfMonth, format, isSameDay, startOfMonth } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { JSX, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import React, { JSX, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Dimensions, Easing, Image, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import UVLevelPanel from "../UvPanel";
+
 
 // Type definitions
 interface CheckInData {
@@ -45,7 +48,6 @@ const StreakScreen: React.FC = () => {
   
   // New state for hard mode functionality
   const [isHardMode, setIsHardMode] = useState<boolean>(false);
-  const [showSettings, setShowSettings] = useState<boolean>(false);
   const [morningCheckIn, setMorningCheckIn] = useState<CheckInData>({ completed: false, photo: null });
   const [eveningCheckIn, setEveningCheckIn] = useState<CheckInData>({ completed: false, photo: null });
   const [currentCheckInType, setCurrentCheckInType] = useState<'morning' | 'evening'>('morning');
@@ -59,10 +61,20 @@ const StreakScreen: React.FC = () => {
   const [showPhotoViewer, setShowPhotoViewer] = useState<boolean>(false);
   const [viewerDate, setViewerDate] = useState<Date>(new Date());
   
-  // Mode switch cooldown state
-  const [pendingMode, setPendingMode] = useState<boolean | null>(null);
-  const [showConfirmation, setShowConfirmation] = useState(false);
-  const [lastModeSwitch, setLastModeSwitch] = useState<number | null>(null);
+  // Dark mode state
+  const [darkMode, setDarkMode] = useState<boolean>(false);
+
+  //Awards
+  const milestones = [7, 15, 30, 50, 100];
+
+  // For progress bar + popup
+  const [nextMilestone, setNextMilestone] = useState<number | null>(null);
+  const [showMilestoneModal, setShowMilestoneModal] = useState<boolean>(false);
+
+  const [showProgressToast, setShowProgressToast] = useState(false);
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(-120)).current; // slide from above screen
+
 
   const requestNotificationPermission = async () => {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -81,14 +93,45 @@ const StreakScreen: React.FC = () => {
     return true;
   };
 
+  // Load hard mode status from Firestore
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            // Get hard mode status from Firestore
+            if (userData.hardMode !== undefined) {
+              setIsHardMode(userData.hardMode);
+              // Also save to AsyncStorage for compatibility
+              await AsyncStorage.setItem("isHardMode", JSON.stringify(userData.hardMode));
+            }
+          }
+        } catch (error) {
+          console.error('Error loading hard mode from Firestore:', error);
+        }
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   useEffect(() => {
     loadStreak();
     loadStreakPhotos();
-    loadSettings();
     loadDailyCheckIns();
     requestPermissions();
     loadCheckedInDates();
     requestNotificationPermission();
+    loadDarkMode().then(setDarkMode);
+  }, []);
+
+  // Refresh dark mode periodically to sync with profile changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadDarkMode().then(setDarkMode);
+    }, 200);
+    return () => clearInterval(interval);
   }, []);
 
   const loadCheckedInDates = async (): Promise<void> => {
@@ -113,81 +156,13 @@ const StreakScreen: React.FC = () => {
     }
   };
 
-  const loadSettings = async (): Promise<void> => {
-    try {
-      const hardMode = await AsyncStorage.getItem('isHardMode');
-      const lastSwitch = await AsyncStorage.getItem('lastModeSwitch');
-      
-      if (hardMode !== null) {
-        setIsHardMode(JSON.parse(hardMode) as boolean);
-      }
-      if (lastSwitch !== null) {
-        setLastModeSwitch(parseInt(lastSwitch, 10));
-      }
-    } catch (error) {
-      console.error('Error loading settings:', error);
-    }
-  };
+  useEffect(() => {
+    const milestone = milestones.find(m => m > streak) || null;
+    setNextMilestone(milestone);
+  }, [streak]);
+  
 
-  const saveSettings = async (hardMode: boolean): Promise<void> => {
-    try {
-      const now = Date.now();
-      await AsyncStorage.multiSet([
-        ['isHardMode', JSON.stringify(hardMode)],
-        ['lastModeSwitch', now.toString()]
-      ]);
-      setIsHardMode(hardMode);
-      setLastModeSwitch(now);
-    } catch (error) {
-      console.error('Error saving settings:', error);
-    }
-  };
 
-  const canSwitchMode = (): boolean => {
-    if (lastModeSwitch === null) return true;
-    const daysSinceSwitch = Math.floor((Date.now() - lastModeSwitch) / (1000 * 60 * 60 * 24));
-    return daysSinceSwitch >= 7;
-  };
-
-  const getDaysUntilSwitch = (): number => {
-    if (lastModeSwitch === null) return 0;
-    const daysSinceSwitch = Math.floor((Date.now() - lastModeSwitch) / (1000 * 60 * 60 * 24));
-    return Math.max(0, 7 - daysSinceSwitch);
-  };
-
-  const handleModeToggle = (value: boolean): void => {
-    if (!canSwitchMode()) {
-      const daysLeft = getDaysUntilSwitch();
-      Alert.alert(
-        'Mode Switch Cooldown',
-        `You can switch modes again in ${daysLeft} ${daysLeft === 1 ? 'day' : 'days'}.`,
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
-    setPendingMode(value);
-    setShowConfirmation(true);
-  };
-
-  const confirmModeSwitch = (): void => {
-    if (pendingMode !== null) {
-      saveSettings(pendingMode);
-      setShowConfirmation(false);
-      setPendingMode(null);
-      
-      Alert.alert(
-        'Mode Changed',
-        `Switched to ${pendingMode ? 'Hard' : 'Easy'} mode. You can change modes again in 7 days.`,
-        [{ text: 'OK' }]
-      );
-    }
-  };
-
-  const cancelModeSwitch = (): void => {
-    setShowConfirmation(false);
-    setPendingMode(null);
-  };
 
   const loadDailyCheckIns = async (): Promise<void> => {
     try {
@@ -289,7 +264,20 @@ const StreakScreen: React.FC = () => {
       const today = new Date();
       const lastOpened = await AsyncStorage.getItem("lastOpened");
       const storedStreak = parseInt((await AsyncStorage.getItem("streak")) || "0", 10);
-      const hardMode = JSON.parse((await AsyncStorage.getItem("isHardMode")) || "false") as boolean;
+      
+      // Load hard mode from Firestore instead of AsyncStorage
+      const currentUser = auth.currentUser;
+      let hardMode = false;
+      if (currentUser) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+          if (userDoc.exists()) {
+            hardMode = userDoc.data().hardMode || false;
+          }
+        } catch (error) {
+          console.error('Error loading hard mode:', error);
+        }
+      }
 
       let newStreak = storedStreak;
       let checkedInToday = false;
@@ -319,10 +307,52 @@ const StreakScreen: React.FC = () => {
       
       setStreak(newStreak);
       setHasCheckedInToday(checkedInToday);
+
     } catch (error) {
       console.error('Error loading streak:', error);
     }
   };
+ useEffect(() => {
+  if (streak <= 0) return;
+
+  const next = milestones.find(m => m > streak);
+  if (!next) return;
+
+  const progress = streak / next;
+
+  // Reset animation starting width
+  progressAnim.setValue(0);
+
+  // Animate width
+  Animated.timing(progressAnim, {
+    toValue: progress,
+    duration: 600,
+    easing: Easing.out(Easing.ease),
+    useNativeDriver: false
+  }).start();
+
+  // Slide down
+  Animated.timing(slideAnim, {
+    toValue: 0,
+    duration: 300,
+    easing: Easing.out(Easing.ease),
+    useNativeDriver: false
+  }).start();
+
+  setShowProgressToast(true);
+
+  // Auto-close toast
+  setTimeout(() => {
+    Animated.timing(slideAnim, {
+      toValue: -140,
+      duration: 300,
+      easing: Easing.in(Easing.ease),
+      useNativeDriver: false
+    }).start(() => setShowProgressToast(false));
+  }, 3000);
+
+}, [streak]);
+
 
   const pickImage = async (): Promise<void> => {
     Alert.alert(
@@ -473,8 +503,16 @@ const StreakScreen: React.FC = () => {
       setHasCheckedInToday(checkedInToday);
       setSelectedPhoto(null);
       setCheckingIn(false);
+      // Check milestone
+      if (milestones.includes(newStreak)) {
+        setShowMilestoneModal(true);
 
-      Alert.alert('Success!', `Check-in successful! Your streak is now ${newStreak} ${newStreak === 1 ? 'day' : 'days'}! 🔥`);
+        // Auto-close after 4 seconds
+        setTimeout(() => setShowMilestoneModal(false), 4000);
+      }
+
+
+
       await scheduleHourlyReminders();
 
       await saveStreakToFirestore(newStreak, morningCheckIn, eveningCheckIn);
@@ -552,6 +590,14 @@ const StreakScreen: React.FC = () => {
 
         setStreak(newStreak);
         setHasCheckedInToday(true);
+        // Check milestone
+        if (milestones.includes(newStreak)) {
+          setShowMilestoneModal(true);
+
+          // Auto-close after 4 seconds
+          setTimeout(() => setShowMilestoneModal(false), 4000);
+        }
+
         
         Alert.alert('Day Complete!', `Both check-ins completed! Your streak is now ${newStreak} ${newStreak === 1 ? 'day' : 'days'}! 🔥`);
       } else {
@@ -846,17 +892,22 @@ const StreakScreen: React.FC = () => {
     
     const allCells: (Date | null)[] = [...emptyCells, ...days];
     
+    // Dark mode colors for calendar
+    const calTextColor = darkMode ? '#ffffff' : '#374151';
+    const calSecondaryTextColor = darkMode ? '#cbd5e0' : '#6B7280';
+    const calCardBg = bgColor;
+    
     return (
-      <View>
+      <View style = {{  flex: 1, backgroundColor: bgColor }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <TouchableOpacity
             onPress={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))}
             style={{ padding: 8 }}
           >
-            <Ionicons name="chevron-back" size={24} color="#374151" />
+            <Ionicons name="chevron-back" size={24} color={calTextColor} />
           </TouchableOpacity>
           
-          <Text style={{ fontSize: 18, fontWeight: 'bold' }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: calTextColor }}>
             {format(currentMonth, 'MMMM yyyy')}
           </Text>
           
@@ -864,14 +915,14 @@ const StreakScreen: React.FC = () => {
             onPress={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))}
             style={{ padding: 8 }}
           >
-            <Ionicons name="chevron-forward" size={24} color="#374151" />
+            <Ionicons name="chevron-forward" size={24} color={calTextColor} />
           </TouchableOpacity>
         </View>
         
         <View style={{ flexDirection: 'row', marginBottom: 10 }}>
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
             <View key={day} style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: '#6B7280' }}>{day}</Text>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: calSecondaryTextColor }}>{day}</Text>
             </View>
           ))}
         </View>
@@ -897,14 +948,19 @@ const StreakScreen: React.FC = () => {
                   flex: 1,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: isCheckedIn ? '#22c55e' : (isToday ? '#e5e7eb' : 'transparent'),
+                  backgroundColor: isCheckedIn ? '#22c55e' : (isToday ? (bgColor) : 'transparent'),
                   borderRadius: 4,
                   borderWidth: isToday ? 1 : 0,
-                  borderColor: '#5C6BC0'
+                  borderColor: '#5C6BC0',
+                  shadowColor: isCheckedIn ? '#22c55e' : 'transparent',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 8,
+                  elevation: 5,
                 }}>
                   <Text style={{
                     fontSize: 14,
-                    color: isCheckedIn ? 'white' : '#374151',
+                    color: isCheckedIn ? 'white' : calTextColor,
                     fontWeight: isToday ? 'bold' : 'normal'
                   }}>
                     {day.getDate()}
@@ -918,51 +974,103 @@ const StreakScreen: React.FC = () => {
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 20, gap: 20 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <View style={{ width: 16, height: 16, backgroundColor: '#22c55e', borderRadius: 3, marginRight: 6 }} />
-            <Text style={{ fontSize: 12, color: '#6B7280' }}>Checked in (tap to view)</Text>
+            <Text style={{ fontSize: 12, color: calSecondaryTextColor }}>Checked in (tap to view)</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ width: 16, height: 16, backgroundColor: '#e5e7eb', borderRadius: 3, marginRight: 6, borderWidth: 1, borderColor: '#5C6BC0' }} />
-            <Text style={{ fontSize: 12, color: '#6B7280' }}>Today</Text>
+            <View style={{ width: 16, height: 16, backgroundColor: calCardBg, borderRadius: 3, marginRight: 6, borderWidth: 1, borderColor: '#5C6BC0' }} />
+            <Text style={{ fontSize: 12, color: calSecondaryTextColor }}>Today</Text>
           </View>
         </View>
       </View>
     );
   };
+  const renderProgressToast = () => {
+  if (!showProgressToast || !nextMilestone) return null;
+
+  const barWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"]
+  });
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScrollView style={{flex:1, backgroundColor: 'white' }} showsVerticalScrollIndicator={false}>
-        <TouchableOpacity
-          onPress={() => setShowSettings(true)}
-          style={{
-            position: 'absolute',
-            top: 50,
-            right: 20,
-            zIndex: 10,
-            padding: 8,
-            backgroundColor: '#f3f4f6',
-            borderRadius: 8
-          }}
-        >
-          <Ionicons name="settings" size={24} color="#374151" />
-        </TouchableOpacity>
+    <Animated.View style={{
+      position: "absolute",
+      top: slideAnim,
+      alignSelf: "center",
+      width: "90%",
+      backgroundColor: bgColor,
+      padding: 25  ,
+      borderRadius: 14,
+      zIndex: 999,
+      shadowColor: primaryColor,
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 10,
+    }}>
+      <Text style={{ fontSize: 18, fontWeight: "bold", color: textColor, marginBottom: 6 }}>
+        🔥 Daily Check-in!
+      </Text>
 
+      <View style={{
+        width: "100%",
+        height: 14,
+        backgroundColor: darkMode ? "#2d2f45" : "#e5e7eb",
+        borderRadius: 10,
+        overflow: "hidden",
+      }}>
+        <Animated.View style={{
+          height: "100%",
+          backgroundColor: primaryColor,
+          borderRadius: 10,
+          width: barWidth,
+        }} />
+      </View>
+
+      <Text style={{ color: secondaryTextColor, textAlign: "center", marginTop: 6 }}>
+        {nextMilestone - streak} more days to {nextMilestone}! 🏆
+      </Text>
+    </Animated.View>
+  );
+};
+
+
+
+  // Dark mode colors
+  const bgColor = darkMode ? '#1a1f3a' : 'white';
+  const textColor = darkMode ? '#ffffff' : '#374151';
+  const secondaryTextColor = darkMode ? '#cbd5e0' : '#6B7280';
+  const cardBg = darkMode ? '#2d3748' : '#f3f4f6';
+  const borderColor = darkMode ? '#4a5568' : '#e5e7eb';
+  const iconBg = darkMode ? '#374151' : '#e0e7ff';
+  const planBg = darkMode ? '#374151' : '#374151';
+  const modalBg = darkMode ? '#2d3748' : 'white';
+  const primaryColor = '#5C6BC0';
+
+  return (
+
+    <View style={{ flex: 1, backgroundColor: bgColor }}>
+      <ScrollView style={{flex:1, backgroundColor: bgColor }} showsVerticalScrollIndicator={false}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, paddingTop: 20, marginTop: 80 }}>
-          <Text style={{ fontSize: 60, fontWeight: 'bold', color: '#5C6BC0', marginBottom: 16 }}>{streak}</Text>
-          <Text style={{ fontSize: 24, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
+          <Text style={{ fontSize: 60, fontWeight: 'bold', color: primaryColor, marginBottom: 16, shadowColor: primaryColor,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.4,
+                shadowRadius: 12,
+                elevation: 6, }}>{streak}</Text>
+          <Text style={{ fontSize: 24, fontWeight: '600', color: textColor, marginBottom: 8 }}>
             Day{streak !== 1 ? 's' : ''} Streak 🔥
           </Text>
-          <Text style={{ fontSize: 16, color: '#6B7280', marginBottom: 8 }}>
+
+          <Text style={{ fontSize: 16, color: secondaryTextColor, marginBottom: 8 }}>
             {isHardMode ? 'Hard Mode' : 'Easy Mode'}
           </Text>
           {streak > 0 && (
-            <Text style={{ fontSize: 18, color: '#6B7280', marginBottom: 32 }}>
-              Keep it up! You're doing great!
+            <Text style={{ fontSize: 18, color: secondaryTextColor, marginBottom: 32 }}>
+              {hasCheckedInToday ? "Keep it up! You're doing great!" : `Check in to keep the ${streak}-day streak going!`}
             </Text>
           )}
 
           {isHardMode && (
-            <View style={{ flexDirection: 'row', marginBottom: 20, backgroundColor: '#f3f4f6', borderRadius: 8, padding: 4 }}>
+            <View style={{ flexDirection: 'row', marginBottom: 20, backgroundColor: cardBg, borderRadius: 8, padding: 4 }}>
               <TouchableOpacity
                 onPress={() => setCurrentCheckInType('morning')}
                 style={{
@@ -975,7 +1083,7 @@ const StreakScreen: React.FC = () => {
               >
                 <Text style={{
                   textAlign: 'center',
-                  color: currentCheckInType === 'morning' ? 'white' : '#374151',
+                  color: currentCheckInType === 'morning' ? 'white' : textColor,
                   fontWeight: '600'
                 }}>
                   Morning {morningCheckIn.completed ? '✓' : ''}
@@ -993,7 +1101,7 @@ const StreakScreen: React.FC = () => {
               >
                 <Text style={{
                   textAlign: 'center',
-                  color: currentCheckInType === 'evening' ? 'white' : '#374151',
+                  color: currentCheckInType === 'evening' ? 'white' : textColor,
                   fontWeight: '600'
                 }}>
                   Evening {eveningCheckIn.completed ? '✓' : ''}
@@ -1005,7 +1113,7 @@ const StreakScreen: React.FC = () => {
           <View style={{ width: '100%', marginTop: 16 }}>
             {!shouldShowPhotoUpload() && getCurrentPhoto() ? (
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>
+                <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8, color: textColor }}>
                   {isHardMode ? `${currentCheckInType.charAt(0).toUpperCase() + currentCheckInType.slice(1)}'s Photo` : "Today's Photo"}
                 </Text>
                 <Image 
@@ -1023,7 +1131,11 @@ const StreakScreen: React.FC = () => {
                 />
                 <TouchableOpacity
                   onPress={removePhoto}
-                  style={{ backgroundColor: '#ef4444', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, marginBottom: 8 }}
+                  style={{ backgroundColor: '#ef4444', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, marginBottom: 8, shadowColor: '#ef4444',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8,
+                elevation: 5, }}
                 >
                   <Text style={{ color: 'white', fontWeight: '600' }}>Remove Photo</Text>
                 </TouchableOpacity>
@@ -1033,10 +1145,10 @@ const StreakScreen: React.FC = () => {
                 onPress={pickImage}
                 style={{
                   width: '100%',
-                  backgroundColor: '#f3f4f6',
+                  backgroundColor: cardBg,
                   borderWidth: 2,
                   borderStyle: 'dashed',
-                  borderColor: '#9ca3af',
+                  borderColor: darkMode ? '#4a5568' : '#9ca3af',
                   borderRadius: 8,
                   padding: 32,
                   alignItems: 'center',
@@ -1046,8 +1158,8 @@ const StreakScreen: React.FC = () => {
                 }}
                 disabled={!shouldShowPhotoUpload()}
               >
-                <Ionicons name="camera" size={40} color="#666" />
-                <Text style={{ color: '#6b7280', marginTop: 8, textAlign: 'center' }}>
+                <Ionicons name="camera" size={40} color={secondaryTextColor} />
+                <Text style={{ color: secondaryTextColor, marginTop: 8, textAlign: 'center' }}>
                   {shouldShowPhotoUpload() 
                     ? `Tap to upload a photo\n(Required for ${isHardMode ? currentCheckInType : ''} check-in)`
                     : 'Already checked in'
@@ -1069,7 +1181,12 @@ const StreakScreen: React.FC = () => {
               borderRadius: 12,
               alignItems: 'center',
               justifyContent: 'center',
-              opacity: (canCheckIn() && !checkingIn && !isUploading) ? 1 : 0.5
+              opacity: (canCheckIn() && !checkingIn && !isUploading) ? 1 : 0.5,
+              shadowColor: primaryColor,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.4,
+              shadowRadius: 12,
+              elevation: 6, 
             }}
           >
             {checkingIn || isUploading ? (
@@ -1087,174 +1204,13 @@ const StreakScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
         
-        <View style={{ marginTop: 30, paddingHorizontal: 16, backgroundColor: 'white'}}>
+        <View style={{ marginTop: 30, paddingHorizontal: 16, backgroundColor: bgColor}}>
           <UVLevelPanel />
         </View>
-
-        <Modal
-          animationType="slide"
-          transparent={true}
-          visible={showSettings}
-          onRequestClose={() => setShowSettings(false)}
-        >
-          <View style={{ 
-            flex: 1, 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            backgroundColor: 'rgba(0,0,0,0.5)' 
-          }}>
-            <View style={{ 
-              backgroundColor: 'white', 
-              padding: 20, 
-              borderRadius: 12, 
-              width: '80%',
-              alignItems: 'center' 
-            }}>
-              <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>Settings</Text>
-              
-              <View style={{ 
-                flexDirection: 'row', 
-                alignItems: 'center', 
-                justifyContent: 'space-between', 
-                width: '100%', 
-                marginBottom: 20 
-              }}>
-                <Text style={{ fontSize: 18 }}>Hard Mode</Text>
-                <Switch
-                  value={isHardMode}
-                  onValueChange={handleModeToggle}
-                  trackColor={{ false: '#767577', true: '#5C6BC0' }}
-                  thumbColor={isHardMode ? '#ffffff' : '#f4f3f4'}
-                />
-              </View>
-              
-              <Text style={{ 
-                fontSize: 14, 
-                color: '#6B7280', 
-                textAlign: 'center', 
-                marginBottom: 10
-              }}>
-                {isHardMode 
-                  ? 'Hard mode requires morning and evening check-ins with photos' 
-                  : 'Easy mode requires one check-in per day with a photo'
-                }
-              </Text>
-
-              {lastModeSwitch !== null && (
-                <Text style={{ 
-                  fontSize: 12, 
-                  color: canSwitchMode() ? '#22c55e' : '#ef4444', 
-                  textAlign: 'center', 
-                  marginBottom: 20,
-                  fontWeight: '600'
-                }}>
-                  {canSwitchMode() 
-                    ? '✓ You can switch modes now' 
-                    : `🔒 Mode change available in ${getDaysUntilSwitch()} ${getDaysUntilSwitch() === 1 ? 'day' : 'days'}`
-                  }
-                </Text>
-              )}
-              
-              <TouchableOpacity
-                onPress={() => setShowSettings(false)}
-                style={{
-                  backgroundColor: '#5C6BC0',
-                  paddingHorizontal: 20,
-                  paddingVertical: 10,
-                  borderRadius: 8
-                }}
-              >
-                <Text style={{ color: 'white', fontWeight: '600' }}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+        
 
         <Modal
           animationType="fade"
-          transparent={true}
-          visible={showConfirmation}
-          onRequestClose={cancelModeSwitch}
-        >
-          <View style={{ 
-            flex: 1, 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            backgroundColor: 'rgba(0,0,0,0.5)' 
-          }}>
-            <View style={{ 
-              backgroundColor: 'white', 
-              padding: 24, 
-              borderRadius: 12, 
-              width: '85%',
-              alignItems: 'center' 
-            }}>
-              <Ionicons name="warning" size={48} color="#f59e0b" style={{ marginBottom: 16 }} />
-              
-              <Text style={{ fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' }}>
-                Are you sure?
-              </Text>
-              
-              <Text style={{ 
-                fontSize: 16, 
-                color: '#374151', 
-                textAlign: 'center', 
-                marginBottom: 20,
-                lineHeight: 22
-              }}>
-                You're about to switch to {pendingMode ? 'Hard' : 'Easy'} mode. 
-                You won't be able to change modes again for 7 days.
-              </Text>
-
-              <View style={{ 
-                backgroundColor: '#fef3c7', 
-                padding: 12, 
-                borderRadius: 8, 
-                marginBottom: 24,
-                borderLeftWidth: 4,
-                borderLeftColor: '#f59e0b'
-              }}>
-                <Text style={{ fontSize: 14, color: '#92400e', textAlign: 'center' }}>
-                  {pendingMode 
-                    ? '⚠️ Hard mode requires both morning AND evening check-ins daily' 
-                    : '⚠️ Easy mode requires only one check-in per day'
-                  }
-                </Text>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
-                <TouchableOpacity
-                  onPress={cancelModeSwitch}
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#e5e7eb',
-                    paddingVertical: 12,
-                    borderRadius: 8,
-                    alignItems: 'center'
-                  }}
-                >
-                  <Text style={{ color: '#374151', fontWeight: '600', fontSize: 16 }}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={confirmModeSwitch}
-                  style={{
-                    flex: 1,
-                    backgroundColor: '#5C6BC0',
-                    paddingVertical: 12,
-                    borderRadius: 8,
-                    alignItems: 'center'
-                  }}
-                >
-                  <Text style={{ color: 'white', fontWeight: '600', fontSize: 16 }}>Confirm</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          animationType="slide"
           transparent={true}
           visible={showCalendar}
           onRequestClose={() => setShowCalendar(false)}
@@ -1264,18 +1220,19 @@ const StreakScreen: React.FC = () => {
             justifyContent: 'center', 
             alignItems: 'center', 
             backgroundColor: 'rgba(0,0,0,0.5)' 
+            
           }}>
             <View style={{ 
-              backgroundColor: 'white', 
+              backgroundColor: bgColor, 
               padding: 20, 
               borderRadius: 12, 
               width: '90%',
               maxHeight: '80%'
             }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <Text style={{ fontSize: 24, fontWeight: 'bold' }}>Streak Calendar</Text>
+                <Text style={{ fontSize: 24, fontWeight: 'bold', color: textColor }}>Streak Calendar</Text>
                 <TouchableOpacity onPress={() => setShowCalendar(false)}>
-                  <Ionicons name="close" size={24} color="#374151" />
+                  <Ionicons name="close" size={24} color={textColor} />
                 </TouchableOpacity>
               </View>
               
@@ -1293,21 +1250,63 @@ const StreakScreen: React.FC = () => {
         onPress={() => setShowCalendar(true)}
         style={{
           position: 'absolute',
-          bottom: 50,
+          top: 50,
           right: 20,
           zIndex: 10,
           padding: 12,
-          backgroundColor: '#5C6BC0',
+          backgroundColor: primaryColor,
           borderRadius: 50,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.25,
-          shadowRadius: 3.84,
-          elevation: 5
+          shadowColor: primaryColor,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.4,
+          shadowRadius: 12,
+          elevation: 6, 
         }}
       >
         <Ionicons name="calendar" size={28} color="white" />
       </TouchableOpacity>
+              <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showMilestoneModal}
+        onRequestClose={() => setShowMilestoneModal(false)}
+      >
+        <View style={{
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: 'rgba(0,0,0,0.6)'
+        }}>
+          <View style={{
+            backgroundColor: bgColor,
+            padding: 24,
+            borderRadius: 16,
+            width: '80%',
+            alignItems: 'center',
+            shadowColor: primaryColor,
+            shadowOpacity: 0.5,
+            shadowRadius: 14
+          }}>
+            <Text style={{ fontSize: 34 }}>🏆</Text>
+            <Text style={{ fontSize: 22, fontWeight: 'bold', color: textColor, marginBottom: 10 }}>
+              Congratulations!
+            </Text>
+
+            <Text style={{ fontSize: 18, color: textColor, marginBottom: 20 }}>
+              You hit a {streak}-day streak!
+            </Text>
+
+            {nextMilestone && (
+              <Text style={{ fontSize: 16, color: secondaryTextColor }}>
+                Next reward: {nextMilestone} days 🔥
+              </Text>
+            )}
+          </View>
+        </View>
+      </Modal>
+      <View style={{ position: "absolute", top: 25, left: 0, right: 0, zIndex: 999 }}>
+      {renderProgressToast()}
+      </View>
     </View>
   );
 };

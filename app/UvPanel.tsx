@@ -4,19 +4,17 @@ import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
-  StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
-
-
-
+import { loadDarkMode } from '../app/utils/storage';
 
 export default function UVIndexPanel() {
   const [uvData, setUvData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [darkMode, setDarkMode] = useState(false);
 
   // 👇 start with no location
   const [location, setLocation] = useState<{
@@ -25,9 +23,17 @@ export default function UVIndexPanel() {
     name: string;
   } | null>(null);
 
-
   useEffect(() => {
     getUserLocation(); // 👈 fetch device location first
+    loadDarkMode().then(setDarkMode);
+  }, []);
+
+  // Refresh dark mode periodically to sync with profile changes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadDarkMode().then(setDarkMode);
+    }, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   const getUserLocation = async () => {
@@ -71,16 +77,16 @@ export default function UVIndexPanel() {
     fetchUVData(lat, lon);
   };
 
-  const getUVLevel = (uvIndex: number) => {
+  const getUVLevel = (uvIndex: number, isDark: boolean) => {
     if (uvIndex < 3)
-      return { level: 'Low', color: '#22c55e', bgColor: '#f0fdf4' };
+      return { level: 'Low', color: '#22c55e', bgColor: isDark ? '#1a3a1f' : '#f0fdf4' };
     if (uvIndex < 6)
-      return { level: 'Moderate', color: '#eab308', bgColor: '#fefce8' };
+      return { level: 'Moderate', color: '#eab308', bgColor: isDark ? '#3a341a' : '#fefce8' };
     if (uvIndex < 8)
-      return { level: 'High', color: '#f97316', bgColor: '#fff7ed' };
+      return { level: 'High', color: '#f97316', bgColor: isDark ? '#3a251a' : '#fff7ed' };
     if (uvIndex < 11)
-      return { level: 'Very High', color: '#ef4444', bgColor: '#fef2f2' };
-    return { level: 'Extreme', color: '#9333ea', bgColor: '#faf5ff' };
+      return { level: 'Very High', color: '#ef4444', bgColor: isDark ? '#3a1a1a' : '#fef2f2' };
+    return { level: 'Extreme', color: '#9333ea', bgColor: isDark ? '#2a1a3a' : '#faf5ff' };
   };
 
   const getProtectionAdvice = (uvIndex: number) => {
@@ -94,300 +100,142 @@ export default function UVIndexPanel() {
     return 'Avoid sun exposure. Stay in shade. Full protection essential.';
   };
 
+  // Dark mode colors
+  const bgColor = darkMode ? '#1a1f3a' : 'white';
+  const textColor = darkMode ? '#ffffff' : '#374151';
+  const secondaryTextColor = darkMode ? '#cbd5e0' : '#6B7280';
+  const cardBg = darkMode ? '#2d3748' : '#f3f4f6';
+  const borderColor = darkMode ? '#4a5568' : '#e5e7eb';
+  const primaryColor = '#5C6BC0';
+
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Loading UV data...</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: bgColor, padding: 32 }}>
+        <ActivityIndicator size="large" color={primaryColor} />
+        <Text style={{ marginTop: 16, color: secondaryTextColor, fontSize: 16 }}>Loading UV data...</Text>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Error: {error}</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: bgColor, padding: 24 }}>
+        <Text style={{ color: '#ef4444', fontSize: 16, marginBottom: 16, textAlign: 'center' }}>Error: {error}</Text>
         <TouchableOpacity
-          style={styles.retryButton}
+          style={{
+            backgroundColor: primaryColor,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            borderRadius: 8,
+            shadowColor: primaryColor,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 8,
+            elevation: 5,
+          }}
           onPress={() => location ? fetchUVData(location.latitude, location.longitude) : getUserLocation()}
         >
-          <Text style={styles.retryButtonText}>Retry</Text>
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  
-
   if (!location) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Getting your location...</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: bgColor, padding: 32 }}>
+        <ActivityIndicator size="large" color={primaryColor} />
+        <Text style={{ marginTop: 16, color: secondaryTextColor, fontSize: 16 }}>Getting your location...</Text>
       </View>
     );
   }
   const uvIndex = uvData?.current?.uv_index || 0;
-  const uvLevel = getUVLevel(uvIndex);
+  const uvLevel = getUVLevel(uvIndex, darkMode);
 
   return (
     <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
+      style={{ flex: 1, backgroundColor: bgColor }}
+      contentContainerStyle={{ padding: 16, maxWidth: 500, alignSelf: 'center', width: '100%' }}
       refreshControl={
         <RefreshControl
           refreshing={loading}
           onRefresh={() => fetchUVData(location.latitude, location.longitude)}
+          tintColor={primaryColor}
         />
       }
     >
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>UV Index</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <Text style={{ fontSize: 28, fontWeight: 'bold', color: textColor }}>UV Index</Text>
         <TouchableOpacity
-          style={styles.refreshButton}
+          style={{
+            padding: 8,
+            borderRadius: 20,
+            backgroundColor: cardBg,
+            shadowColor: primaryColor,
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.2,
+            shadowRadius: 4,
+            elevation: 3,
+          }}
           onPress={() => fetchUVData(location.latitude, location.longitude)}
         >
-          <Text style={styles.refreshIcon}>↻</Text>
+          <Text style={{ fontSize: 24, color: textColor }}>↻</Text>
         </TouchableOpacity>
       </View>
 
       {/* UV Index Display */}
-      <View style={[styles.uvDisplay, { backgroundColor: uvLevel.bgColor }]}>
-        <Text style={styles.uvNumber}>{uvIndex.toFixed(1)}</Text>
-        <View style={[styles.uvBadge, { backgroundColor: uvLevel.color }]}>
-          <Text style={styles.uvBadgeText}>{uvLevel.level}</Text>
+      <View style={{
+        borderRadius: 12,
+        padding: 24,
+        marginBottom: 16,
+        alignItems: 'center',
+        backgroundColor: uvLevel.bgColor,
+        shadowColor: uvLevel.color,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 5,
+      }}>
+        <Text style={{ fontSize: 64, fontWeight: 'bold', color: darkMode ? textColor : '#1f2937', marginBottom: 8 }}>{uvIndex.toFixed(1)}</Text>
+        <View style={{
+          paddingHorizontal: 16,
+          paddingVertical: 8,
+          borderRadius: 20,
+          backgroundColor: uvLevel.color,
+          shadowColor: uvLevel.color,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.5,
+          shadowRadius: 6,
+          elevation: 4,
+        }}>
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>{uvLevel.level}</Text>
         </View>
       </View>
 
-     
-
       {/* Protection Advice */}
-      <View style={styles.adviceContainer}>
-        <Text style={styles.adviceTitle}>Protection Advice</Text>
-        <Text style={styles.adviceText}>{getProtectionAdvice(uvIndex)}</Text>
+      <View style={{
+        backgroundColor: cardBg,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        shadowColor: primaryColor,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 3,
+      }}>
+        <Text style={{ fontSize: 16, fontWeight: '600', color: textColor, marginBottom: 8 }}>Protection Advice</Text>
+        <Text style={{ fontSize: 14, color: secondaryTextColor, lineHeight: 20 }}>{getProtectionAdvice(uvIndex)}</Text>
       </View>
 
-      
-
       {/* Location Info */}
-      <View style={styles.locationInfo}>
-        <Text style={styles.locationName}>{location.name}</Text>
-        <Text style={styles.timestamp}>
+      <View style={{ alignItems: 'center', marginBottom: 24, paddingVertical: 8 }}>
+        <Text style={{ fontSize: 16, fontWeight: '500', color: textColor }}>{location.name}</Text>
+        <Text style={{ fontSize: 12, color: secondaryTextColor, marginTop: 4 }}>
           Last updated: {new Date().toLocaleTimeString()}
         </Text>
       </View>
-
-  
     </ScrollView>
   );
 }
-
-
-
-
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: 'white',
-  },
-  contentContainer: {
-    padding: 16,
-    maxWidth: 500,
-    alignSelf: 'center',
-    width: '100%',
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 32,
-  },
-  loadingText: {
-    marginTop: 16,
-    color: '#6b7280',
-    fontSize: 16,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 24,
-  },
-  errorText: {
-    color: '#ef4444',
-    fontSize: 16,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  retryButton: {
-    backgroundColor: '#3b82f6',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1f2937',
-  },
-  refreshButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: '#f3f4f6',
-  },
-  refreshIcon: {
-    fontSize: 24,
-    color: '#4b5563',
-  },
-  uvDisplay: {
-    borderRadius: 12,
-    padding: 24,
-    marginBottom: 16,
-    alignItems: 'center',
-  },
-  uvNumber: {
-    fontSize: 64,
-    fontWeight: 'bold',
-    color: '#1f2937',
-    marginBottom: 8,
-  },
-  uvBadge: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  uvBadgeText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  scaleContainer: {
-    marginBottom: 24,
-  },
-  scaleBar: {
-    flexDirection: 'row',
-    height: 16,
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  scaleSegment: {
-    flex: 1,
-  },
-  scaleLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  scaleLabel: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  adviceContainer: {
-    backgroundColor: '#eff6ff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  adviceTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1e3a8a',
-    marginBottom: 8,
-  },
-  adviceText: {
-    fontSize: 14,
-    color: '#1e40af',
-  },
-  locationSelector: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  locationGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  locationButton: {
-    flex: 1,
-    minWidth: '48%',
-    backgroundColor: '#f3f4f6',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  locationButtonText: {
-    fontSize: 14,
-    color: '#374151',
-  },
-  locationInfo: {
-    alignItems: 'center',
-    marginBottom: 24,
-    paddingVertical: 8,
-  },
-  locationName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#374151',
-  },
-  locationCoords: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 4,
-  },
-  timestamp: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 4,
-  },
-  customLocationContainer: {
-    backgroundColor: '#f9fafb',
-    borderRadius: 12,
-    padding: 16,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-  },
-  submitButton: {
-    backgroundColor: '#3b82f6',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
