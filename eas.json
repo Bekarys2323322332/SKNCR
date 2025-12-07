@@ -1,0 +1,39 @@
+{
+  "cli": {
+    "version": ">= 16.28.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "INCI_API_KEY": "XJODelREtsNpdPGydthsr1pRcSYc01gX",
+        "BACKEND_URL": "https://skncr2.onrender.com",
+        "UPCITEMDB_KEY": "YOUR_KEY_IF_YOU_USE_ONE",
+        "API_SECRET": "AMINAVERNIS"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "INCI_API_KEY": "XJODelREtsNpdPGydthsr1pRcSYc01gX",
+        "BACKEND_URL": "https://skncr2.onrender.com",
+        "UPCITEMDB_KEY": "YOUR_KEY_IF_YOU_USE_ONE",
+        "API_SECRET": "AMINAVERNIS"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "INCI_API_KEY": "XJODelREtsNpdPGydthsr1pRcSYc01gX",
+        "BACKEND_URL": "https://skncr2.onrender.com",
+        "UPCITEMDB_KEY": "YOUR_KEY_IF_YOU_USE_ONE",
+        "API_SECRET": "AMINAVERNIS"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

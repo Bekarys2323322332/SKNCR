@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { loadDarkMode } from '../app/utils/storage';
+import { loadDarkMode } from '../utils/storage';
 
 export default function UVIndexPanel() {
   const [uvData, setUvData] = useState<any>(null);
@@ -72,10 +72,6 @@ export default function UVIndexPanel() {
     }
   };
 
-  const changeLocation = (lat: number, lon: number, name: string) => {
-    setLocation({ latitude: lat, longitude: lon, name });
-    fetchUVData(lat, lon);
-  };
 
   const getUVLevel = (uvIndex: number, isDark: boolean) => {
     if (uvIndex < 3)

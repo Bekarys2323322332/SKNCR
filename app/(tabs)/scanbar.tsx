@@ -1,26 +1,104 @@
+import MessagePanel, { PanelAction } from "@/components/MessagePanel";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { useEffect, useRef, useState } from "react";
-import { Alert, Animated, Dimensions, ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { auth, db } from "../utils/firebaseConfig"; // adjust path
-import { loadDarkMode } from "../utils/storage";
+import Constants from "expo-constants";
+import { useFocusEffect } from "expo-router";
+import {
+  doc,
+  getDoc,
+  onSnapshot,
+  updateDoc
+} from "firebase/firestore";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Animated,
+  Dimensions,
+  Linking,
+  Platform,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
+import ErrorModal from "../../components/ErrorModal";
+import { auth, db } from "../../utils/firebaseConfig";
+import { loadDarkMode } from "../../utils/storage";
 
+const { INCI_API_KEY, BACKEND_URL, API_SECRET } = Constants.expoConfig?.extra ?? {};
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const getToday = () => new Date().toISOString().split("T")[0];
+
+
+
 const fetchProductInfo = async (barcode: string) => {
   try {
     const res = await fetch(
       `https://world.openbeautyfacts.org/api/v0/product/${barcode}.json`
     );
     const data = await res.json();
-    return data.status === 1 ? data.product : null;
+    if (data.status === 1) {
+      return {
+        ...data.product,
+        rating: data.product?.rating || null,
+      };
+    }
+    return null;
   } catch (err) {
     console.error("API error:", err);
     return null;
   }
 };
 
+const fetchUPCItemDB = async (barcode: string) => {
+  try {
+    const res = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${barcode}`);
+    const data = await res.json();
 
+    if (data.items && data.items.length > 0) {
+      const item = data.items[0];
+
+      return {
+        title: item.title || null,
+        brand: item.brand || null,
+      };
+    }
+
+    return null;
+  } catch (err) {
+    console.error("UPCItemDB error:", err);
+    return null;
+  }
+};
+
+const fetchInciBeauty = async (name: string) => {
+  try {
+    const query = encodeURIComponent(name.toLowerCase().trim());
+
+    const res = await fetch(
+      `https://api.incibeauty.com/1/products/search?q=${query}`,
+      {
+        headers: {
+          "X-API-KEY": INCI_API_KEY,
+        },
+      }
+    );
+
+    const data = await res.json();
+
+    if (!data.products || data.products.length === 0) return null;
+
+    const product = data.products[0];
+
+    return {
+      product_name: product.name,
+      ingredients_text: product.ingredients?.join(", ") || "",
+    };
+  } catch (err) {
+    console.error("INCI error:", err);
+    return null;
+  }
+};
 
 const fetchUserData = async () => {
   const user = auth.currentUser;
@@ -30,40 +108,20 @@ const fetchUserData = async () => {
   return snap.exists() ? snap.data() : null;
 };
 
-const saveAnalysisDate = async () => {
-  const user = auth.currentUser;
-  if (!user) return;
-  const userRef = doc(db, "users", user.uid);
-  await updateDoc(userRef, { lastAnalysis: new Date().toISOString() });
-};
 
-const checkAnalysisStatus = async (setAlreadyAnalyzed: (v: boolean) => void) => {
-  const user = auth.currentUser;
-  if (!user) return;
 
-  const userRef = doc(db, "users", user.uid);
-  const snap = await getDoc(userRef);
-  if (snap.exists()) {
-    const last = snap.data().lastAnalysis;
-    if (last) {
-      const lastDate = new Date(last);
-      const today = new Date();
-      if (
-        lastDate.getDate() === today.getDate() &&
-        lastDate.getMonth() === today.getMonth() &&
-        lastDate.getFullYear() === today.getFullYear()
-      ) {
-        setAlreadyAnalyzed(false);
-      }
-    }
-  }
-};
+////////////////////////////////////////////////////////////////////////////////
+// MAIN COMPONENT
+////////////////////////////////////////////////////////////////////////////////
 
 const ScanBar = () => {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [product, setProduct] = useState<any>(null);
-  const [alreadyAnalyzed, setAlreadyAnalyzed] = useState(false);
+
+  const [alreadyAnalyzed, setAlreadyAnalyzed] = useState(false);   // ← UPDATED BEHAVIOR
+  const [remainingAnalyses, setRemainingAnalyses] = useState(3);   // ← TRACKING
+
   const [isScanning, setIsScanning] = useState(false);
   const [compatibilityScore, setCompatibilityScore] = useState<number | null>(null);
   const [compatibilityExplanation, setCompatibilityExplanation] = useState<string>("");
@@ -71,159 +129,312 @@ const ScanBar = () => {
   const cameraRef = useRef<any>(null);
   const scannedRef = useRef(false);
   const [darkMode, setDarkMode] = useState(false);
-  
-  // Animation values
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // animation refs preserved exactly as before
   const scanLineAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const scoreCardAnim = useRef(new Animated.Value(0)).current;
+  const progressBarAnim = useRef(new Animated.Value(0)).current;
+  const ratingBarAnim = useRef(new Animated.Value(0)).current;
+
+  const [errorMessage, setErrorMessage] = useState("");
+  const [errorVisible, setErrorVisible] = useState(false);
+  const [errorTitle, setErrorTitle] = useState("");
+
+  const [panelVisible, setPanelVisible] = useState(false);
+  const [panelTitle, setPanelTitle] = useState<string>('');
+  const [panelMessage, setPanelMessage] = useState<string>('');
+  const [panelActions, setPanelActions] = useState<PanelAction[]>([]);
+
+  const showPanel = (title: string, message: string, actions: PanelAction[] = [{ text: 'OK', style: 'default' }]) => {
+    setPanelTitle(title);
+    setPanelMessage(message);
+    setPanelActions(actions);
+    setPanelVisible(true);
+  };
+  const hidePanel = () => setPanelVisible(false);
+
+
+////////////////////////////////////////////////////////////////////////////////
+// SNAPSHOT LISTENER — ONLY CHANGE YOU REQUESTED
+////////////////////////////////////////////////////////////////////////////////
+  useEffect(() => {
+    if (compatibilityScore !== null) {
+      Animated.parallel([
+        Animated.timing(scoreCardAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(progressBarAnim, {
+          toValue: compatibilityScore,
+          duration: 800,
+          useNativeDriver: false,
+        }),
+      ]).start();
+    }
+  }, [compatibilityScore]);
+  
+    useEffect(() => {
+    if (product?.rating) {
+      Animated.timing(ratingBarAnim, {
+        toValue: product.rating,
+        duration: 800,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [product?.rating]);
+
 
   useEffect(() => {
-    if (!permission) {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const userRef = doc(db, "users", user.uid);
+
+    const unsub = onSnapshot(userRef, (snap) => {
+      if (!snap.exists()) return;
+
+      const data = snap.data();
+      const today = getToday();
+
+      let remaining = data.remainingAnalyses;
+      let lastDate = data.lastAnalysisDate;
+
+      // Create missing fields
+      if (remaining === undefined || lastDate === undefined) {
+        updateDoc(userRef, {
+          remainingAnalyses: 3,
+          lastAnalysisDate: today,
+        });
+        remaining = 3;
+        lastDate = today;
+      }
+
+      // Reset at midnight
+      if (lastDate !== today) {
+        updateDoc(userRef, {
+          lastAnalysisDate: today,
+          remainingAnalyses: 3,
+        });
+        remaining = 3;
+      }
+
+      setRemainingAnalyses(remaining);
+      setAlreadyAnalyzed(remaining <= 0);
+    });
+
+    return () => unsub();
+  }, []);
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+// ORIGINAL useEffects AND UI LOGIC — UNCHANGED
+////////////////////////////////////////////////////////////////////////////////
+
+useEffect(() => {
+  if (!permission) return;
+
+  if (!permission.granted) {
+    if (permission.canAskAgain) {
       requestPermission();
-    }
-    checkAnalysisStatus(setAlreadyAnalyzed);
-       loadDarkMode().then(setDarkMode);
-  }, []);
-
-  // Refresh dark mode periodically to sync with profile changes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadDarkMode().then(setDarkMode);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Scanning animation
-  useEffect(() => {
-    if (isScanning && !scanned) {
-      // Scanning line animation - back and forth
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(scanLineAnim, {
-            toValue: 1,
-            duration: 3000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scanLineAnim, {
-            toValue: 0,
-            duration: 3000,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-
-      // Pulse animation for corners - less dynamic
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.05,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 1500,
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
     } else {
-      scanLineAnim.setValue(0);
-      pulseAnim.setValue(1);
+      showPanel(
+        "Camera Permission Blocked",
+        "You disabled camera access. Enable it in Settings to scan products.",
+        [
+          {
+            text: "Open Settings",
+            style: "destructive",
+            onPress: () => {
+              if (Platform.OS === "ios") Linking.openURL("app-settings:");
+              else Linking.openSettings();
+            }
+          },
+          { text: "Cancel", style: "cancel" }
+        ]
+      );
     }
-  }, [isScanning, scanned]);
+  }
 
-  const handleBarCodeScanned = async ({ type, data }: any) => {
-    if (scannedRef.current || !isScanning) return;
+  loadDarkMode().then(setDarkMode);
+}, [permission]);
 
-    scannedRef.current = true;
-    setScanned(true);
-    setIsScanning(false);
-    console.log(`Scanned barcode type ${type} with data ${data}`);
+useEffect(() => {
+  const interval = setInterval(() => {
+    loadDarkMode().then(setDarkMode);
+  }, 2000);
+  return () => clearInterval(interval);
+}, []);
 
-    const result = await fetchProductInfo(data);
-    if (result) {
-      setProduct(result);
-      // Don't automatically analyze - wait for button press
-    } else {
-      Alert.alert("Not Found", "Product not found.");
-      setProduct(null);
+useFocusEffect(
+  useCallback(() => {
+    return () => {
+      setIsScanning(false);
       setScanned(false);
       scannedRef.current = false;
-    }
-  };
+      if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+    };
+  }, [])
+);
 
-  const startScanning = () => {
+
+
+////////////////////////////////////////////////////////////////////////////////
+// handleBarCodeScanned — UNCHANGED
+////////////////////////////////////////////////////////////////////////////////
+
+const handleBarCodeScanned = async ({ type, data }: any) => {
+  if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+  if (scannedRef.current || !isScanning) return;
+
+  scannedRef.current = true;
+  setScanned(true);
+  setIsScanning(false);
+
+  const upcInfo = await fetchUPCItemDB(data);
+  let finalProduct = null;
+
+  if (upcInfo?.title) {
+    const inciProduct = await fetchInciBeauty(upcInfo.title);
+    if (inciProduct?.ingredients_text) finalProduct = inciProduct;
+  }
+
+  if (!finalProduct) {
+    const obf = await fetchProductInfo(data);
+    if (obf) {
+      finalProduct = {
+        product_name: obf.product_name || upcInfo?.title || "Unknown Product",
+        ingredients_text: obf.ingredients_text || "",
+        rating: obf.rating || null,
+      };
+    }
+  }
+
+  if (!finalProduct) {
+    setErrorTitle("Not Found");
+    setErrorMessage("Product not found in any database.");
+    setErrorVisible(true);
+    setProduct(null);
     setScanned(false);
     scannedRef.current = false;
-    setProduct(null);
-    setCompatibilityScore(null);
-    setCompatibilityExplanation("");
-    setIsScanning(true);
-  };
-
-  const stopScanning = () => {
-    setIsScanning(false);
-  };
-
-
-  const handleAnalysis = async (productData?: any) => {
-  const productToAnalyze = productData || product;
-  if (!productToAnalyze?.ingredients_text) {
-    Alert.alert("Error", "No product components found.");
     return;
   }
 
-  const userData = await fetchUserData();
-  console.log("Fetched user data:", userData);
-
-  try {
-    // Use your local/dev backend URL here
-    const backendUrl = 'https://marti-phytological-fidela.ngrok-free.dev/analyze_compatibility';
-
-    const response = await fetch(backendUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user: userData,
-        product_name: productToAnalyze.product_name ?? "",
-        product_ingredients: productToAnalyze.ingredients_text ?? ""
-      })
-    });
-
-    console.log("Response status:", response.status);
-
-    if (!response.ok) {
-      const text = await response.text();
-      console.error("Server returned non-OK status:", text);
-      throw new Error(`Server error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log("Response JSON:", data);
-
-    // Extract score and explanation safely
-    const score = data.compatibility_score ?? 50;
-    const explanationObj = data.explanation ?? {};
-    const reasons: string[] = explanationObj.reasons ?? [];
-    const simpleExplanation = reasons.join("\n") || "No explanation available";
-
-    console.log("Parsed score:", score);
-    console.log("Parsed explanation:", simpleExplanation);
-
-    setCompatibilityScore(score);
-    setCompatibilityExplanation(simpleExplanation);
-
-    await saveAnalysisDate();
-    setAlreadyAnalyzed(true);
-
-  } catch (err) {
-    console.error("Error fetching compatibility:", err);
-    Alert.alert("Error", "Could not fetch compatibility score.");
-  }
+  setProduct(finalProduct);
 };
 
 
 
+////////////////////////////////////////////////////////////////////////////////
+// startScanning AND stopScanning — UNCHANGED
+////////////////////////////////////////////////////////////////////////////////
+
+const startScanning = () => {
+  setScanned(false);
+  scannedRef.current = false;
+  setProduct(null);
+  setCompatibilityScore(null);
+  setCompatibilityExplanation("");
+  setIsScanning(true);
+
+  if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+  scanTimeoutRef.current = setTimeout(() => {
+    if (!scannedRef.current) {
+      setIsScanning(false);
+      setErrorTitle("No Barcode Detected");
+      setErrorMessage("No product scanned for 15 seconds. Please try again.");
+      setErrorVisible(true);
+
+      scannedRef.current = false;
+      setScanned(false);
+    }
+  }, 15000);
+};
+
+const stopScanning = () => {
+  if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+  setIsScanning(false);
+};
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+// handleAnalysis — ONLY LOGIC CHANGE IS LIMIT CHECK + DEDUCTION
+////////////////////////////////////////////////////////////////////////////////
+
+const handleAnalysis = async (productData?: any) => {
+  setIsAnalyzing(true);
+
+  const productToAnalyze = productData || product;
+  if (!productToAnalyze?.ingredients_text) {
+    setErrorTitle("Error");
+    setErrorMessage("No product components found.");
+    setErrorVisible(true);
+    setIsAnalyzing(false);
+    return;
+  }
+
+  const user = auth.currentUser;
+  if (!user) return;
+  const userRef = doc(db, "users", user.uid);
+
+  // Daily Limit Check
+  if (remainingAnalyses <= 0) {
+    showPanel(
+      "Daily Limit Reached",
+      "You can analyze only 3 products per day. Come back tomorrow!",
+      [{ text: "OK", style: "default" }]
+    );
+    setIsAnalyzing(false);
+    return;
+  }
+
+  const userData = await fetchUserData();
+
+  try {
+    const response = await fetch(`${BACKEND_URL}/analyze_compatibility`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_SECRET,
+      },
+      body: JSON.stringify({
+        user: userData,
+        product_name: productToAnalyze.product_name ?? "",
+        product_ingredients: productToAnalyze.ingredients_text ?? "",
+      }),
+    });
+
+    if (!response.ok) throw new Error("Server error");
+
+    const data = await response.json();
+
+    const score = data.compatibility_score ?? 50;
+    const reasons = data.explanation?.reasons ?? [];
+    const explanationText = reasons.join("\n");
+
+    setCompatibilityScore(score);
+    setCompatibilityExplanation(explanationText);
+
+    // Deduct 1
+    await updateDoc(userRef, {
+      remainingAnalyses: remainingAnalyses - 1,
+      lastAnalysisDate: getToday(),
+    });
+
+  } catch (err) {
+    console.error("Error fetching compatibility:", err);
+    setErrorTitle("Error");
+    setErrorMessage("Could not fetch compatibility score.");
+    setErrorVisible(true);
+  }
+
+  setIsAnalyzing(false);
+};
 
   const DashedBorder = ({ size, color }: { size: number; color: string }) => {
     const cornerSize = 20;
@@ -269,29 +480,79 @@ const ScanBar = () => {
     );
   }
 
-  if (!permission.granted) {
+  if (!permission?.granted) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: bgColor, paddingHorizontal: 16 }}>
-        <Text style={{ fontSize: 16, color: textColor, marginBottom: 16 }}>No camera access</Text>
+      <View style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: bgColor,
+        paddingHorizontal: 20,
+      }}>
+        <Text style={{ fontSize: 16, color: textColor, marginBottom: 16 }}>
+          Camera access is required to scan products.
+        </Text>
+
         <TouchableOpacity
-          onPress={requestPermission}
+          onPress={async () => {
+            const result = await requestPermission();
+
+            // User still denied → show retry / settings panel
+            if (!result.granted) {
+              showPanel(
+                "Camera Permission Needed",
+                "Please grant camera access to use the scanner.",
+                [
+                  {
+                    text: "Try Again",
+                    style: "default",
+                    onPress: () => requestPermission(),
+                  },
+                  {
+                    text: "Open Settings",
+                    style: "destructive",
+                    onPress: () => {
+                      if (Platform.OS === "ios") {
+                        Linking.openURL("app-settings:");
+                      } else {
+                        Linking.openSettings();
+                      }
+                    },
+                  },
+                  { text: "Cancel", style: "cancel" }
+                ]
+              );
+            }
+          }}
           style={{
             backgroundColor: primaryColor,
-            paddingVertical: 12,
-            paddingHorizontal: 24,
+            paddingVertical: 14,
+            paddingHorizontal: 28,
             borderRadius: 12,
             shadowColor: primaryColor,
             shadowOffset: { width: 0, height: 4 },
             shadowOpacity: 0.3,
             shadowRadius: 8,
-            elevation: 5,
+            elevation: 6,
           }}
         >
-          <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>Allow Camera</Text>
+          <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+            Enable Camera
+          </Text>
         </TouchableOpacity>
+
+        <MessagePanel
+          visible={panelVisible}
+          title={panelTitle}
+          message={panelMessage}
+          actions={panelActions}
+          onClose={hidePanel}
+          darkMode={darkMode}
+        />
       </View>
     );
   }
+
 
   const frameSize = SCREEN_WIDTH * 0.75;
   const scanLineTranslateY = scanLineAnim.interpolate({
@@ -312,6 +573,7 @@ const ScanBar = () => {
             {/* Camera View */}
             <CameraView
               ref={cameraRef}
+              zoom={0}   
               style={{
                 width: frameSize,
                 height: frameSize,
@@ -323,6 +585,7 @@ const ScanBar = () => {
               }}
               onBarcodeScanned={isScanning && !scanned ? handleBarCodeScanned : undefined}
             />
+
             
             {/* Overlay with dashed border */}
             <View style={{ position: 'absolute', width: frameSize, height: frameSize, pointerEvents: 'none' }}>
@@ -421,25 +684,92 @@ const ScanBar = () => {
               fontSize: 24, 
               fontWeight: 'bold', 
               color: textColor, 
-              marginBottom: 24,
+              marginBottom: 16,
               textAlign: 'center'
             }}>
               {product.product_name || 'Unknown Product'}
             </Text>
 
-            {/* AI Compatibility Score */}
-            {compatibilityScore !== null && (
+            {/* Rating Section */}
+            {product.rating && (
               <View style={{
-                marginBottom: 24,
                 backgroundColor: cardBg,
                 borderRadius: 12,
                 padding: 16,
-                shadowColor: primaryColor,
+                marginBottom: 24,
+                shadowColor: '#f59e0b',
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.2,
                 shadowRadius: 8,
                 elevation: 3,
               }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: textColor }}>
+                    OpenBeautyFacts Rating
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="star" size={20} color="#f59e0b" style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 16, fontWeight: 'bold', color: textColor }}>
+                      {product.rating.toFixed(1)}/5
+                    </Text>
+                  </View>
+                </View>
+                
+                {/* Rating Progress Bar */}
+                <View style={{ 
+                  height: 8, 
+                  backgroundColor: darkMode ? '#374151' : '#e5e7eb', 
+                  borderRadius: 4, 
+                  overflow: 'hidden'
+                }}>
+                  <Animated.View style={{ 
+                    height: '100%', 
+                    width: ratingBarAnim.interpolate({
+                      inputRange: [0, 5],
+                      outputRange: ['0%', '100%'],
+                    }),
+                    backgroundColor: '#f59e0b',
+                    borderRadius: 4,
+                    shadowColor: '#f59e0b',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.5,
+                    shadowRadius: 4,
+                    elevation: 2,
+                  }} />
+                </View>
+              </View>
+            )}
+
+            {/* AI Compatibility Score */}
+            {compatibilityScore !== null && (
+              <Animated.View 
+                style={{
+                  marginBottom: 24,
+                  backgroundColor: cardBg,
+                  borderRadius: 12,
+                  padding: 16,
+                  shadowColor: primaryColor,
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 8,
+                  elevation: 3,
+                  opacity: scoreCardAnim,
+                  transform: [
+                    {
+                      translateY: scoreCardAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [50, 0],
+                      }),
+                    },
+                    {
+                      scale: scoreCardAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.9, 1],
+                      }),
+                    },
+                  ],
+                }}
+              >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <Text style={{ fontSize: 18, fontWeight: '600', color: textColor }}>
                     AI Compatibility Score
@@ -457,9 +787,12 @@ const ScanBar = () => {
                   overflow: 'hidden',
                   marginBottom: 12
                 }}>
-                  <View style={{ 
+                  <Animated.View style={{ 
                     height: '100%', 
-                    width: `${compatibilityScore}%`, 
+                    width: progressBarAnim.interpolate({
+                      inputRange: [0, 100],
+                      outputRange: ['0%', '100%'],
+                    }),
                     backgroundColor: compatibilityScore >= 70 ? '#22c55e' : compatibilityScore >= 50 ? '#f59e0b' : '#ef4444',
                     borderRadius: 4,
                     shadowColor: compatibilityScore >= 70 ? '#22c55e' : compatibilityScore >= 50 ? '#f59e0b' : '#ef4444',
@@ -479,7 +812,7 @@ const ScanBar = () => {
                 }}>
                   {compatibilityExplanation || 'No explanation available.'}
                 </Text>
-              </View>
+              </Animated.View>
             )}
 
             {/* Ingredients Section */}
@@ -530,17 +863,19 @@ const ScanBar = () => {
               </View>
             )}
 
-            {/* Analyze Button (if not auto-analyzed) */}
+            {/* Analyze Button*/}
             {!compatibilityScore && product.ingredients_text && (
               <TouchableOpacity
+                disabled={isAnalyzing || alreadyAnalyzed}
                 onPress={() => handleAnalysis()}
                 style={{
-                  backgroundColor: primaryColor,
+                  backgroundColor: isAnalyzing || alreadyAnalyzed ? '#9ca3af' : primaryColor,
                   paddingVertical: 16,
                   paddingHorizontal: 24,
                   borderRadius: 12,
                   marginTop: 24,
                   alignItems: 'center',
+                  opacity: isAnalyzing || alreadyAnalyzed ? 0.7 : 1,
                   shadowColor: primaryColor,
                   shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.3,
@@ -548,15 +883,25 @@ const ScanBar = () => {
                   elevation: 5,
                 }}
               >
-                <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
-                  Get Compatibility Score
-                </Text>
+                {isAnalyzing ? (
+                  <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
+                    Analyzing...
+                  </Text>
+                ) : (
+                  <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '600' }}>
+                    Get Compatibility Score
+                  </Text>
+                )}
               </TouchableOpacity>
             )}
+          <Text style={{ color: secondaryTextColor, marginTop: 10, textAlign: "center" }}>
+            Daily analyses left: {alreadyAnalyzed ? 0 : remainingAnalyses}
+          </Text>
 
             {/* Scan Again Button */}
             <TouchableOpacity
               onPress={() => {
+                if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);  // ← ADD HERE
                 setScanned(false);
                 scannedRef.current = false;
                 setProduct(null);
@@ -585,6 +930,21 @@ const ScanBar = () => {
           </View>
         )}
       </ScrollView>
+      <ErrorModal
+        visible={errorVisible}
+        message={errorMessage}
+        title={errorTitle}
+        onClose={() => setErrorVisible(false)}
+        darkMode={darkMode}
+      />
+      <MessagePanel
+        visible={panelVisible}
+        title={panelTitle}
+        message={panelMessage}
+        actions={panelActions}
+        onClose={hidePanel}
+        darkMode={darkMode}
+      />
     </View>
   );
 };

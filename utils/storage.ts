@@ -1,4 +1,4 @@
-import { auth, db } from "@/app/utils/firebaseConfig";
+import { auth, db } from "@/utils/firebaseConfig";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { deleteField, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 const STORAGE_KEY = "skincarePlan";
@@ -70,4 +70,35 @@ export const loadDarkMode = async (): Promise<boolean> => {
   // Fallback to local storage
   const saved = await AsyncStorage.getItem(DARK_MODE_KEY);
   return saved ? JSON.parse(saved) : false;
+};
+
+
+export const wipeAllUserLocalData = async (uid: string) => {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+
+    // patterns to clean
+    const userPatterns = [
+      `streakPhotos_${uid}`,
+      `hardModeLocal_${uid}`,
+      `hardModeLastDisabledLocal_${uid}`,
+      `lastNameChangeLocal_${uid}`,
+      `${uid}_morning_`,
+      `${uid}_evening_`,
+      `checkedInDates_${uid}`,
+    ];
+
+    // filter any key that starts with or includes the UID
+    const keysToDelete = keys.filter(key =>
+      userPatterns.some(pattern => key.startsWith(pattern) || key.includes(pattern))
+    );
+
+    if (keysToDelete.length > 0) {
+      await AsyncStorage.multiRemove(keysToDelete);
+    }
+
+    console.log("🔄 wipeAllUserLocalData:", keysToDelete);
+  } catch (err) {
+    console.error("Error wiping user local data:", err);
+  }
 };

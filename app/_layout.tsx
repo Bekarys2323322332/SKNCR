@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { useEffect, useState } from "react";
 import './globals.css';
 
+
 export default function RootLayout() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isOnboarded, setIsOnboarded] = useState(false);
@@ -24,7 +25,7 @@ export default function RootLayout() {
   if (loading) return null;
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
       {!isLoggedIn ? (
         <Stack.Screen name="(auth)/login" />
       ) : !isOnboarded ? (

@@ -1,21 +1,20 @@
-import { auth, db } from "@/app/utils/firebaseConfig";
+import { auth, db } from "@/utils/firebaseConfig";
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { doc, setDoc } from "firebase/firestore";
 import React, { ReactNode, useEffect, useState } from 'react';
 import {
   Alert,
-  Dimensions,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
-import { savePlan } from "../utils/storage";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { savePlan } from "../../utils/storage";
 
-const { width } = Dimensions.get('window');
+
 
 interface SkincareAnswers {
   skinType: string;
@@ -248,11 +247,31 @@ const Skincare: React.FC = () => {
 
   useEffect(() => {
     const user = auth.currentUser;
+
+
     if (!user) {
-      console.log("No user logged in, redirecting to login");
       router.replace("/(auth)/login");
+      return;
     }
+
+
+    user.reload().then(() => {
+      const refreshedUser = auth.currentUser;
+
+      if (!refreshedUser) {
+        router.replace("/(auth)/login");
+        return;
+      }
+
+
+      if (!refreshedUser.emailVerified) {
+        auth.signOut();
+        router.replace("/(auth)/login");
+        return;
+      }
+    });
   }, []);
+
 
   const currentQuestion = questions[currentStep];
   const progress = ((currentStep + 1) / questions.length) * 100;
@@ -446,6 +465,7 @@ const Skincare: React.FC = () => {
       await setDoc(
   userRef,
   {
+    skincarePlanCompleted: true,
     skinType: answers.skinType,
     concerns: answers.concerns,
     sunExposure: answers.sunExposure,
@@ -481,7 +501,7 @@ const Skincare: React.FC = () => {
   };
 
   const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
-    <View className="h-2 bg-slate-200 rounded overflow-hidden">
+    <View className="h-2 bg-slate-200 rounded overflow-hidden mt-2">
       <View style={{ width: `${progress}%` }} className="h-full bg-indigo-400 rounded" />
     </View>
   );
@@ -739,7 +759,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 6,
+    marginTop: 15,
   },
   stepText: {
     fontSize: 14,

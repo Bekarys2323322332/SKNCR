@@ -1,18 +1,21 @@
-import { auth, db } from '@/app/utils/firebaseConfig';
-import { loadDarkMode } from '@/app/utils/storage';
+import { auth, db } from '@/utils/firebaseConfig';
+import { loadDarkMode } from '@/utils/storage';
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { differenceInCalendarDays, eachDayOfInterval, endOfMonth, format, isSameDay, startOfMonth } from 'date-fns';
+import { differenceInCalendarDays, format } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
-import { onAuthStateChanged } from "firebase/auth";
+import { router, useFocusEffect } from 'expo-router';
+import { onAuthStateChanged, reload } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { JSX, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Easing, Image, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import UVLevelPanel from "../UvPanel";
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Easing, Image, Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import CalendarModal from '../../components/CalendarModal';
+import ErrorModal from '../../components/ErrorModal';
+import MessagePanel, { PanelAction } from '../../components/MessagePanel';
+import PhotoViewer from '../../components/PhotoViewer';
+import UVLevelPanel from "../../components/UvPanel";
 
-
-// Type definitions
 interface CheckInData {
   completed: boolean;
   photo: string | null;
@@ -29,6 +32,13 @@ interface ImagePickerAsset {
   type?: string;
 }
 
+interface CheckinDetail {
+  morningDone: boolean;
+  eveningDone: boolean;
+  completedHardMode: boolean;
+}
+
+// Notification handler
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldPlaySound: false,
@@ -38,43 +48,75 @@ Notifications.setNotificationHandler({
   }),
 });
 
+
 const StreakScreen: React.FC = () => {
+  // State
   const [streak, setStreak] = useState<number>(0);
   const [checkingIn, setCheckingIn] = useState<boolean>(false);
   const [hasCheckedInToday, setHasCheckedInToday] = useState<boolean>(false);
+
   const [selectedPhoto, setSelectedPhoto] = useState<ImagePickerAsset | null>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [streakPhotos, setStreakPhotos] = useState<StreakPhotos>({});
-  
-  // New state for hard mode functionality
+
   const [isHardMode, setIsHardMode] = useState<boolean>(false);
   const [morningCheckIn, setMorningCheckIn] = useState<CheckInData>({ completed: false, photo: null });
   const [eveningCheckIn, setEveningCheckIn] = useState<CheckInData>({ completed: false, photo: null });
   const [currentCheckInType, setCurrentCheckInType] = useState<'morning' | 'evening'>('morning');
-  
-  // Calendar state
+
   const [showCalendar, setShowCalendar] = useState<boolean>(false);
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [checkedInDates, setCheckedInDates] = useState<Set<string>>(new Set());
-  
-  // Photo viewer state
+  const [checkinDetails, setCheckinDetails] = useState<Record<string, CheckinDetail>>({});
+
   const [showPhotoViewer, setShowPhotoViewer] = useState<boolean>(false);
   const [viewerDate, setViewerDate] = useState<Date>(new Date());
-  
-  // Dark mode state
+
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
-  //Awards
   const milestones = [7, 15, 30, 50, 100];
-
-  // For progress bar + popup
   const [nextMilestone, setNextMilestone] = useState<number | null>(null);
   const [showMilestoneModal, setShowMilestoneModal] = useState<boolean>(false);
+  const [streakLoading, setStreakLoading] = useState(true);
+
+  const [errorMessage, setErrorMessage] = useState("");
+  const [errorTitle, setErrorTitle] = useState("");
+  const [errorVisible, setErrorVisible] = useState(false);
 
   const [showProgressToast, setShowProgressToast] = useState(false);
   const progressAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(-120)).current; // slide from above screen
+  const slideAnim = useRef(new Animated.Value(-120)).current;
 
+  const [panelVisible, setPanelVisible] = useState(false);
+  const [panelTitle, setPanelTitle] = useState<string>('');
+  const [panelMessage, setPanelMessage] = useState<string>('');
+  const [panelActions, setPanelActions] = useState<PanelAction[]>([]);
+
+  const showPanel = (title: string, message: string, actions: PanelAction[] = [{ text: 'OK', style: 'default' }]) => {
+    setPanelTitle(title);
+    setPanelMessage(message);
+    setPanelActions(actions);
+    setPanelVisible(true);
+  };
+
+  const hidePanel = () => setPanelVisible(false);
+
+  const showError = (title: string, message: string) => {
+    setErrorTitle(title);
+    setErrorMessage(message);
+    setErrorVisible(true);
+  };
+  
+  
+  
+
+  // Keep dark mode in sync (polling)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadDarkMode().then(setDarkMode);
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
 
   const requestNotificationPermission = async () => {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -93,127 +135,263 @@ const StreakScreen: React.FC = () => {
     return true;
   };
 
-  // Load hard mode status from Firestore
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-          if (userDoc.exists()) {
-            const userData = userDoc.data();
-            // Get hard mode status from Firestore
-            if (userData.hardMode !== undefined) {
-              setIsHardMode(userData.hardMode);
-              // Also save to AsyncStorage for compatibility
-              await AsyncStorage.setItem("isHardMode", JSON.stringify(userData.hardMode));
-            }
-          }
-        } catch (error) {
-          console.error('Error loading hard mode from Firestore:', error);
-        }
+    let isMounted = true;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+
+      
+      if (!currentUser) {
+        router.replace("/(auth)/login");
+        return;
+      }
+
+      await reload(currentUser);
+
+      if (!currentUser.emailVerified) {
+        await auth.signOut();
+        router.replace("/(auth)/login");
+        return;
+      }
+
+
+      if (!isMounted) return;
+
+      try {
+        setStreakLoading(true);
+
+        await loadUserData(currentUser.uid);
+        await loadStreakPhotos();
+        await loadDailyCheckIns();
+        requestPermissions();
+        requestNotificationPermission();
+
+        loadDarkMode().then(setDarkMode);
+
+      } catch (e) {
+        console.error("Error loading user data:", e);
+
+      } finally {
+        if (isMounted) setStreakLoading(false);
       }
     });
-    return unsubscribe;
+
+    return () => {
+      isMounted = false;
+      unsubscribeAuth();
+    };
   }, []);
 
-  useEffect(() => {
-    loadStreak();
-    loadStreakPhotos();
-    loadDailyCheckIns();
-    requestPermissions();
-    loadCheckedInDates();
-    requestNotificationPermission();
-    loadDarkMode().then(setDarkMode);
-  }, []);
 
-  // Refresh dark mode periodically to sync with profile changes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadDarkMode().then(setDarkMode);
-    }, 200);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadCheckedInDates = async (): Promise<void> => {
-    try {
-      const savedDates = await AsyncStorage.getItem('checkedInDates');
-      if (savedDates) {
-        setCheckedInDates(new Set(JSON.parse(savedDates) as string[]));
-      }
-    } catch (error) {
-      console.error('Error loading checked-in dates:', error);
-    }
-  };
-
-  const saveCheckedInDate = async (date: Date): Promise<void> => {
-    try {
-      const dateString = format(date, 'yyyy-MM-dd');
-      const updatedDates = new Set([...checkedInDates, dateString]);
-      await AsyncStorage.setItem('checkedInDates', JSON.stringify([...updatedDates]));
-      setCheckedInDates(updatedDates);
-    } catch (error) {
-      console.error('Error saving checked-in date:', error);
-    }
-  };
-
+  // Next milestone tracking
   useEffect(() => {
     const milestone = milestones.find(m => m > streak) || null;
     setNextMilestone(milestone);
   }, [streak]);
-  
+
+  // Progress toast animation when streak changes
+  useEffect(() => {
+    if (streak <= 0) return;
+
+    const next = milestones.find(m => m > streak);
+    if (!next) return;
+
+    const progress = streak / next;
+    progressAnim.setValue(0);
+
+    Animated.timing(progressAnim, {
+      toValue: progress,
+      duration: 600,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: false
+    }).start();
+
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: false
+    }).start();
+
+    setShowProgressToast(true);
+
+    setTimeout(() => {
+      Animated.timing(slideAnim, {
+        toValue: -140,
+        duration: 300,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: false
+      }).start(() => setShowProgressToast(false));
+    }, 3000);
+  }, [streak]);
+
+  // ---- Data helpers ----
+
+  async function loadUserData(userId: string): Promise<void> {
+    const userRef = doc(db, "users", userId);
+    const userDoc = await getDoc(userRef);
+
+    const today = new Date();
+    const todayStr = format(today, 'yyyy-MM-dd');
+
+    if (!userDoc.exists()) {
+      await setDoc(userRef, {
+        streakCount: 0,
+        lastCheckin: null,
+        hasCheckedInToday: false,
+        hardMode: false,
+        checkinDates: [],
+        checkinProgress: {}
+      });
+
+      setStreak(0);
+      setHasCheckedInToday(false);
+      setIsHardMode(false);
+      setCheckedInDates(new Set());
+      setCheckinDetails({});
+      setMorningCheckIn(prev => ({ ...prev, completed: false }));
+      setEveningCheckIn(prev => ({ ...prev, completed: false }));
+      return;
+    }
+
+    const data = userDoc.data();
+
+    // 1. Load hard mode instantly from local storage (instant UI update)
+    const localHardMode = await AsyncStorage.getItem(`hardModeLocal_${userId}`);
+    if (localHardMode !== null) {
+      setIsHardMode(JSON.parse(localHardMode));
+    }
+
+    // 2. Then load remote hard mode (slow)
+    if (data.hardMode !== undefined) {
+      setIsHardMode(data.hardMode);
+      await AsyncStorage.setItem(`hardModeLocal_${userId}`, JSON.stringify(data.hardMode));
+    }
 
 
 
-  const loadDailyCheckIns = async (): Promise<void> => {
-    try {
-      const today = format(new Date(), 'yyyy-MM-dd');
-      const morningData = await AsyncStorage.getItem(`morning_${today}`);
-      const eveningData = await AsyncStorage.getItem(`evening_${today}`);
-      
-      if (morningData) {
-        setMorningCheckIn(JSON.parse(morningData) as CheckInData);
-      } else {
-        setMorningCheckIn({ completed: false, photo: null });
+    // Checked-in dates
+    const dates: string[] = data.checkinDates || [];
+    setCheckedInDates(new Set(dates));
+
+    // Streak + last check-in
+    const lastCheckin = data.lastCheckin ? data.lastCheckin.toDate() : null;
+    let currentStreak = data.streakCount ?? 0;
+    let checkedToday = data.hasCheckedInToday ?? false;
+
+    if (lastCheckin) {
+      const diff = differenceInCalendarDays(today, lastCheckin);
+
+      if (diff > 1) {
+        // streak broken
+        currentStreak = 0;
+        checkedToday = false;
+        await setDoc(userRef, {
+          streakCount: 0,
+          hasCheckedInToday: false
+        }, { merge: true });
+      } else if (diff >= 1) {
+        // new day
+        checkedToday = false;
+        await setDoc(userRef, {
+          hasCheckedInToday: false
+        }, { merge: true });
       }
-      
-      if (eveningData) {
-        setEveningCheckIn(JSON.parse(eveningData) as CheckInData);
-      } else {
-        setEveningCheckIn({ completed: false, photo: null });
-      }
-    } catch (error) {
-      console.error('Error loading daily check-ins:', error);
     }
-  };
 
-  const saveDailyCheckIn = async (type: string, data: CheckInData): Promise<void> => {
+    setStreak(currentStreak);
+    setHasCheckedInToday(checkedToday);
+
+    // Progress (hard mode) → morning/evening + calendar dots
+    const progress = data.checkinProgress || {};
+    const todayProgress = progress[todayStr] || { morning: false, evening: false };
+
+    setMorningCheckIn(prev => ({
+      ...prev,
+      completed: !!todayProgress.morning
+    }));
+
+    setEveningCheckIn(prev => ({
+      ...prev,
+      completed: !!todayProgress.evening
+    }));
+
+    const details: Record<string, CheckinDetail> = {};
+    Object.keys(progress).forEach(dateStr => {
+      const p = progress[dateStr] || {};
+      details[dateStr] = {
+        morningDone: !!p.morning,
+        eveningDone: !!p.evening,
+        completedHardMode: !!p.morning && !!p.evening
+      };
+    });
+    setCheckinDetails(details);
+  }
+
+  async function loadStreakPhotos(): Promise<void> {
     try {
-      const today = format(new Date(), 'yyyy-MM-dd');
-      await AsyncStorage.setItem(`${type}_${today}`, JSON.stringify(data));
-    } catch (error) {
-      console.error('Error saving daily check-in:', error);
-    }
-  };
-
-  const requestPermissions = async (): Promise<void> => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please grant camera roll permissions to upload photos.');
-    }
-  };
-
-  const loadStreakPhotos = async (): Promise<void> => {
-    try {
-      const savedPhotos = await AsyncStorage.getItem('streakPhotos');
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      const savedPhotos = await AsyncStorage.getItem(`streakPhotos_${uid}`);
       if (savedPhotos) {
         setStreakPhotos(JSON.parse(savedPhotos) as StreakPhotos);
       }
     } catch (error) {
       console.error('Error loading streak photos:', error);
     }
-  };
+  }
 
-  const savePhotoToStorage = async (photoUri: string, type: string = 'single'): Promise<boolean> => {
+  async function loadDailyCheckIns(): Promise<void> {
+    try {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+
+      const morningData = await AsyncStorage.getItem(`${uid}_morning_${today}`);
+      const eveningData = await AsyncStorage.getItem(`${uid}_evening_${today}`);
+
+
+
+      if (morningData) {
+        const parsed = JSON.parse(morningData) as CheckInData;
+        setMorningCheckIn(prev => ({
+          completed: prev.completed || parsed.completed,
+          photo: parsed.photo ?? prev.photo
+        }));
+      }
+
+      if (eveningData) {
+        const parsed = JSON.parse(eveningData) as CheckInData;
+        setEveningCheckIn(prev => ({
+          completed: prev.completed || parsed.completed,
+          photo: parsed.photo ?? prev.photo
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading daily check-ins:', error);
+    }
+  }
+
+  async function saveDailyCheckIn(type: 'morning' | 'evening', data: CheckInData): Promise<void> {
+    try {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+
+      await AsyncStorage.setItem(`${uid}_${type}_${today}`, JSON.stringify(data));
+    } catch (error) {
+      console.error('Error saving daily check-in:', error);
+    }
+  }
+
+  async function requestPermissions(): Promise<void> {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please grant camera roll permissions to upload photos.');
+    }
+  }
+
+  async function savePhotoToStorage(photoUri: string, type: 'single' | 'morning' | 'evening' = 'single'): Promise<boolean> {
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
       const photoKey = type === 'single' ? today : `${today}_${type}`;
@@ -221,17 +399,24 @@ const StreakScreen: React.FC = () => {
         ...streakPhotos,
         [photoKey]: photoUri,
       };
-      
-      await AsyncStorage.setItem('streakPhotos', JSON.stringify(updatedPhotos));
+      const uid = auth.currentUser?.uid;
+      if (!uid) return false;
+      await AsyncStorage.setItem(`streakPhotos_${uid}`, JSON.stringify(updatedPhotos));
       setStreakPhotos(updatedPhotos);
       return true;
     } catch (error) {
       console.error('Error saving photo:', error);
-      Alert.alert('Error', 'Failed to save photo locally');
+      showError("Save Failed", "Could not save photo. Please try again.");
       return false;
     }
-  };
-
+  }
+    useFocusEffect(
+      React.useCallback(() => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) return; 
+        loadUserData(uid);
+      }, [])
+    );
   const scheduleHourlyReminders = async () => {
     const hasPermission = await requestNotificationPermission();
     if (!hasPermission) return;
@@ -253,106 +438,81 @@ const StreakScreen: React.FC = () => {
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
           seconds: r.hours * 60 * 60,
-          repeats: false,        
+          repeats: false,
         },
       });
     }
   };
 
-  const loadStreak = async (): Promise<void> => {
-    try {
-      const today = new Date();
-      const lastOpened = await AsyncStorage.getItem("lastOpened");
-      const storedStreak = parseInt((await AsyncStorage.getItem("streak")) || "0", 10);
-      
-      // Load hard mode from Firestore instead of AsyncStorage
-      const currentUser = auth.currentUser;
-      let hardMode = false;
-      if (currentUser) {
-        try {
-          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
-          if (userDoc.exists()) {
-            hardMode = userDoc.data().hardMode || false;
-          }
-        } catch (error) {
-          console.error('Error loading hard mode:', error);
-        }
-      }
+  async function saveDateToFirestore(date: Date): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
 
-      let newStreak = storedStreak;
-      let checkedInToday = false;
-      
-      if (lastOpened) {
-        const lastDate = new Date(lastOpened);
-        const dayDifference = differenceInCalendarDays(today, lastDate);
-        if (dayDifference > 1) {
-          newStreak = 0;
-          await AsyncStorage.multiSet([
-            ["streak", newStreak.toString()],
-          ]);
-        }
-        if (dayDifference === 0) {
-          if (hardMode) {
-            const todayStr = format(today, 'yyyy-MM-dd');
-            const morningData = await AsyncStorage.getItem(`morning_${todayStr}`);
-            const eveningData = await AsyncStorage.getItem(`evening_${todayStr}`);
-            const morning = morningData ? JSON.parse(morningData) as CheckInData : { completed: false, photo: null };
-            const evening = eveningData ? JSON.parse(eveningData) as CheckInData : { completed: false, photo: null };
-            checkedInToday = morning.completed && evening.completed;
-          } else {
-            checkedInToday = true;
-          }
-        }
-      }
-      
-      setStreak(newStreak);
-      setHasCheckedInToday(checkedInToday);
+    const userRef = doc(db, "users", currentUser.uid);
+    const dateStr = format(date, "yyyy-MM-dd");
 
-    } catch (error) {
-      console.error('Error loading streak:', error);
+    const snapshot = await getDoc(userRef);
+    const existing = snapshot.data()?.checkinDates || [];
+
+    if (!existing.includes(dateStr)) {
+      const updated = [...existing, dateStr];
+
+      await setDoc(
+        userRef,
+        { checkinDates: updated },
+        { merge: true }
+      );
+
+      setCheckedInDates(new Set(updated));
     }
-  };
- useEffect(() => {
-  if (streak <= 0) return;
+  }
 
-  const next = milestones.find(m => m > streak);
-  if (!next) return;
+  async function savePartialCheckInProgress(dateStr: string, type: 'morning' | 'evening'): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
 
-  const progress = streak / next;
+    const userRef = doc(db, "users", currentUser.uid);
+    const userDoc = await getDoc(userRef);
+    const existing = userDoc.data()?.checkinProgress || {};
 
-  // Reset animation starting width
-  progressAnim.setValue(0);
+    const day = existing[dateStr] || { morning: false, evening: false };
+    day[type] = true;
 
-  // Animate width
-  Animated.timing(progressAnim, {
-    toValue: progress,
-    duration: 600,
-    easing: Easing.out(Easing.ease),
-    useNativeDriver: false
-  }).start();
+    await setDoc(
+      userRef,
+      {
+        checkinProgress: {
+          ...existing,
+          [dateStr]: day,
+        },
+      },
+      { merge: true }
+    );
 
-  // Slide down
-  Animated.timing(slideAnim, {
-    toValue: 0,
-    duration: 300,
-    easing: Easing.out(Easing.ease),
-    useNativeDriver: false
-  }).start();
+    // Update local calendar details immediately
+    setCheckinDetails(prev => {
+      const prevDay = prev[dateStr] || {
+        morningDone: false,
+        eveningDone: false,
+        completedHardMode: false
+      };
 
-  setShowProgressToast(true);
+      const updatedDay: CheckinDetail = {
+        morningDone: type === 'morning' ? true : prevDay.morningDone,
+        eveningDone: type === 'evening' ? true : prevDay.eveningDone,
+        completedHardMode:
+          (type === 'morning' ? true : prevDay.morningDone) &&
+          (type === 'evening' ? true : prevDay.eveningDone),
+      };
 
-  // Auto-close toast
-  setTimeout(() => {
-    Animated.timing(slideAnim, {
-      toValue: -140,
-      duration: 300,
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: false
-    }).start(() => setShowProgressToast(false));
-  }, 3000);
+      return {
+        ...prev,
+        [dateStr]: updatedDay
+      };
+    });
+  }
 
-}, [streak]);
-
+  // ---- Image picking ----
 
   const pickImage = async (): Promise<void> => {
     Alert.alert(
@@ -376,66 +536,125 @@ const StreakScreen: React.FC = () => {
   };
 
   const openCamera = async (): Promise<void> => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please grant camera permissions to take photos.');
-      return;
+    const { status, canAskAgain } = await ImagePicker.getCameraPermissionsAsync();
+
+    if (status !== "granted") {
+      if (canAskAgain) {
+        const { status: newStatus } = await ImagePicker.requestCameraPermissionsAsync();
+        if (newStatus !== "granted") {
+          return Alert.alert(
+            "Camera Permission Needed",
+            "Camera access is required to take a photo.",
+            [
+              { text: "Try Again", onPress: () => openCamera() },
+              { text: "Cancel", style: "cancel" }
+            ]
+          );
+        }
+      } else {
+        return Alert.alert(
+          "Camera Permission Blocked",
+          "You disabled camera access. Please enable it in Settings.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Open Settings",
+              onPress: () => {
+                if (Platform.OS === "ios") Linking.openURL("app-settings:");
+                else Linking.openSettings();
+              }
+            }
+          ]
+        );
+      }
     }
 
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
+      allowsEditing: false,
       quality: 0.8,
+      aspect: [4, 3],
     });
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
+    if (!result.canceled && result.assets?.length > 0) {
       setSelectedPhoto(result.assets[0]);
     }
   };
 
   const openImageLibrary = async (): Promise<void> => {
+    const { status, canAskAgain } = await ImagePicker.getMediaLibraryPermissionsAsync();
+
+    if (status !== "granted") {
+      if (canAskAgain) {
+        const { status: newStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (newStatus !== "granted") {
+          return Alert.alert(
+            "Photo Library Permission Needed",
+            "We need access to your library to upload a photo.",
+            [
+              { text: "Try Again", onPress: () => openImageLibrary() },
+              { text: "Cancel", style: "cancel" }
+            ]
+          );
+        }
+      } else {
+        return Alert.alert(
+          "Library Permission Blocked",
+          "You disabled photo library access. Enable it in Settings.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Open Settings",
+              onPress: () => {
+                if (Platform.OS === "ios") Linking.openURL("app-settings:");
+                else Linking.openSettings();
+              }
+            }
+          ]
+        );
+      }
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      aspect: [4, 3],
       quality: 0.8,
+      aspect: [4, 3],
     });
 
-    if (!result.canceled && result.assets && result.assets.length > 0) {
+    if (!result.canceled && result.assets?.length > 0) {
       setSelectedPhoto(result.assets[0]);
     }
   };
 
-  const uploadPhoto = async (type: string = 'single'): Promise<boolean> => {
+  const uploadPhoto = async (type: 'single' | 'morning' | 'evening' = 'single'): Promise<boolean> => {
     if (!selectedPhoto) return false;
 
     setIsUploading(true);
     try {
       const photoSaved = await savePhotoToStorage(selectedPhoto.uri, type);
-      
       if (!photoSaved) {
         return false;
       }
-
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
       return true;
     } catch (error) {
       console.error('Save error:', error);
-      Alert.alert('Save Failed', 'Failed to save photo. Please try again.');
+      showError("Save Failed", "Could not save photo. Please try again.");
       return false;
     } finally {
       setIsUploading(false);
     }
   };
 
+  // ---- Check-in logic ----
+
   const checkIn = async (): Promise<void> => {
     await Notifications.cancelAllScheduledNotificationsAsync();
     if (checkingIn) return;
 
     if (!selectedPhoto) {
-      Alert.alert('Photo Required', 'Please upload a photo before checking in');
+      showError('Photo Required', 'Please upload a photo before checking in');
       return;
     }
 
@@ -447,237 +666,282 @@ const StreakScreen: React.FC = () => {
   };
 
   const handleEasyModeCheckIn = async (): Promise<void> => {
-    if (hasCheckedInToday) return;
-
-    setCheckingIn(true);
-
-    try {
-      const uploadSuccess = await uploadPhoto('single');
-      if (!uploadSuccess) {
-        setCheckingIn(false);
-        return;
-      }
-
-      const today = new Date();
-      const lastOpened = await AsyncStorage.getItem("lastOpened");
-      const storedStreak = parseInt((await AsyncStorage.getItem("streak")) || "0", 10);
-      const startDay = new Date((await AsyncStorage.getItem("startDay")) || today);
-
-      let newStreak = storedStreak;
-      let newStartDay = startDay;
-      let checkedInToday = false;
-
-      if (lastOpened) {
-        const lastDate = new Date(lastOpened);
-        const dayDifference = differenceInCalendarDays(today, lastDate);
-        
-        if (dayDifference === 1) {
-          newStreak += 1;
-          checkedInToday = true;
-        } 
-        else if ((dayDifference > 1 && storedStreak === 0) || (dayDifference === 0 && storedStreak === 0)) {
-          newStreak += 1;
-          newStartDay = today;
-          checkedInToday = true;
-        } else if (dayDifference === 0 && storedStreak > 0) {
-          Alert.alert("Already checked in today!");
-          setCheckingIn(false);
-          checkedInToday = true;
-          return;
-        } 
-      } else {
-        newStreak = 1;
-        newStartDay = today;
-        checkedInToday = true;
-      }
-
-      await AsyncStorage.multiSet([
-        ["streak", newStreak.toString()],
-        ["startDay", newStartDay.toISOString()],
-        ["lastOpened", today.toISOString()],
-      ]);
-
-      await saveCheckedInDate(today);
-
-      setStreak(newStreak);
-      setHasCheckedInToday(checkedInToday);
-      setSelectedPhoto(null);
-      setCheckingIn(false);
-      // Check milestone
-      if (milestones.includes(newStreak)) {
-        setShowMilestoneModal(true);
-
-        // Auto-close after 4 seconds
-        setTimeout(() => setShowMilestoneModal(false), 4000);
-      }
-
-
-
-      await scheduleHourlyReminders();
-
-      await saveStreakToFirestore(newStreak, morningCheckIn, eveningCheckIn);
-
-    } catch (error) {
-      console.error('Check-in error:', error);
-      Alert.alert('Error', 'Failed to check in. Please try again.');
-      setCheckingIn(false);
-    }
-  };
-
-  const handleHardModeCheckIn = async (): Promise<void> => {
-    const checkInType = currentCheckInType;
-
-    if ((checkInType === 'morning' && morningCheckIn.completed) || 
-        (checkInType === 'evening' && eveningCheckIn.completed)) {
-      Alert.alert('Already checked in', `You've already completed your ${checkInType} check-in for today!`);
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      showError("Error", "Please sign in to check in");
       return;
     }
 
     setCheckingIn(true);
 
     try {
-      const uploadSuccess = await uploadPhoto(checkInType);
-      if (!uploadSuccess) {
+      const userRef = doc(db, "users", currentUser.uid);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
         setCheckingIn(false);
         return;
       }
 
-      const checkInData: CheckInData = { completed: true, photo: selectedPhoto!.uri };
-      
-      if (checkInType === 'morning') {
-        setMorningCheckIn(checkInData);
-        await saveDailyCheckIn('morning', checkInData);
-      } else {
-        setEveningCheckIn(checkInData);
-        await saveDailyCheckIn('evening', checkInData);
-      }
+      const data = userDoc.data();
 
-      const bothCompleted = (checkInType === 'morning' ? true : morningCheckIn.completed) && 
-                           (checkInType === 'evening' ? true : eveningCheckIn.completed);
-
-      if (bothCompleted && !hasCheckedInToday) {
-        const today = new Date();
-        const lastOpened = await AsyncStorage.getItem("lastOpened");
-        const storedStreak = parseInt((await AsyncStorage.getItem("streak")) || "0", 10);
-        const startDay = new Date((await AsyncStorage.getItem("startDay")) || today);
-
-        let newStreak = storedStreak;
-        let newStartDay = startDay;
-
-        if (lastOpened) {
-          const lastDate = new Date(lastOpened);
-          const dayDifference = differenceInCalendarDays(today, lastDate);
-          
-          if (dayDifference === 1) {
-            newStreak += 1;
-          } 
-          else if (dayDifference > 1 || storedStreak === 0) {
-            newStreak = 1;
-            newStartDay = today;
-          }
-        } else {
-          newStreak = 1;
-          newStartDay = today;
-        }
-
-        await AsyncStorage.multiSet([
-          ["streak", newStreak.toString()],
-          ["startDay", newStartDay.toISOString()],
-          ["lastOpened", today.toISOString()],
-        ]);
-
-        await saveCheckedInDate(today);
-
-        setStreak(newStreak);
+      // Cross-device protection
+      if (data.hasCheckedInToday === true) {
+        showError("Already Checked In", "Checked in with another device");
         setHasCheckedInToday(true);
-        // Check milestone
-        if (milestones.includes(newStreak)) {
-          setShowMilestoneModal(true);
-
-          // Auto-close after 4 seconds
-          setTimeout(() => setShowMilestoneModal(false), 4000);
-        }
-
-        
-        Alert.alert('Day Complete!', `Both check-ins completed! Your streak is now ${newStreak} ${newStreak === 1 ? 'day' : 'days'}! 🔥`);
-      } else {
-        Alert.alert('Success!', `${checkInType.charAt(0).toUpperCase() + checkInType.slice(1)} check-in completed! ${bothCompleted ? '' : `Don't forget your ${checkInType === 'morning' ? 'evening' : 'morning'} check-in.`}`);
+        setCheckingIn(false);
+        return;
       }
-      await scheduleHourlyReminders();
 
+      // Save local photo first
+      const saved = await uploadPhoto("single");
+      if (!saved) {
+        setCheckingIn(false);
+        return;
+      }
+
+      const today = new Date();
+      const lastCheckin = data.lastCheckin ? data.lastCheckin.toDate() : null;
+      let newStreak = data.streakCount ?? 0;
+
+      if (!lastCheckin) {
+        newStreak = 1;
+      } else {
+        const diff = differenceInCalendarDays(today, lastCheckin);
+        if (diff === 1) newStreak++;
+        if (diff > 1) newStreak = 1;
+        if (diff === 0) {
+          showError("Already Checked In", "Checked in with another device");
+          setCheckingIn(false);
+          return;
+        }
+      }
+
+      await setDoc(userRef, {
+        streakCount: newStreak,
+        lastCheckin: serverTimestamp(),
+        hasCheckedInToday: true
+      }, { merge: true });
+
+      await saveDateToFirestore(today);
+      setStreak(newStreak);
+      setHasCheckedInToday(true);
       setSelectedPhoto(null);
-      setCheckingIn(false);
-      
-      const updatedMorning = checkInType === 'morning' ? checkInData : morningCheckIn;
-      const updatedEvening = checkInType === 'evening' ? checkInData : eveningCheckIn;
-      await saveStreakToFirestore(streak, updatedMorning, updatedEvening);
+      showPanel(
+        "Check-in Complete!",
+        `You checked in successfully! Your streak is now ${newStreak} days.`,
+        [{ text: "OK", style: "default" }]
+      );
 
-    } catch (error) {
-      console.error('Check-in error:', error);
-      Alert.alert('Error', 'Failed to check in. Please try again.');
-      setCheckingIn(false);
+
+      if (milestones.includes(newStreak)) {
+        setShowMilestoneModal(true);
+        setTimeout(() => setShowMilestoneModal(false), 3000);
+      }
+
+      await scheduleHourlyReminders();
+    } catch (err) {
+      console.error("Check-in error:", err);
+      showError("Error", "Failed to check in.");
     }
+
+    setCheckingIn(false);
   };
 
-  const getTodayPhotoUri = (type: string = 'single'): string | undefined => {
+  const handleHardModeCheckIn = async (): Promise<void> => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      showError("Error", "Please sign in to check in");
+      return;
+    }
+
+    setCheckingIn(true);
+
+    try {
+      const userRef = doc(db, "users", currentUser.uid);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
+        setCheckingIn(false);
+        return;
+      }
+
+      const data = userDoc.data();
+      const today = new Date();
+      const checkInType = currentCheckInType;
+
+      // Global lock if day already marked complete (across devices)
+      if (data.hasCheckedInToday === true) {
+        showError("Already Checked In", "Checked in with another device");
+        setHasCheckedInToday(true);
+        setCheckingIn(false);
+        return;
+      }
+
+      // Save local photo
+      const saved = await uploadPhoto(checkInType);
+      if (!saved) {
+        setCheckingIn(false);
+        return;
+      }
+
+      const dateStr = format(today, "yyyy-MM-dd");
+      await savePartialCheckInProgress(dateStr, checkInType);
+
+      // Mark local check-in
+      if (checkInType === "morning") {
+        setMorningCheckIn({ completed: true, photo: selectedPhoto!.uri });
+        await saveDailyCheckIn("morning", { completed: true, photo: selectedPhoto!.uri });
+      } else {
+        setEveningCheckIn({ completed: true, photo: selectedPhoto!.uri });
+        await saveDailyCheckIn("evening", { completed: true, photo: selectedPhoto!.uri });
+      }
+
+      const bothDone =
+        (checkInType === "morning" ? true : morningCheckIn.completed) &&
+        (checkInType === "evening" ? true : eveningCheckIn.completed);
+
+      if (!bothDone) {
+        showPanel("Congratulutaions!", `${checkInType} check-in completed!`);
+        setCheckingIn(false);
+        setSelectedPhoto(null);
+        return;
+      }
+
+      // Both morning & evening done → full day
+      await saveDateToFirestore(today);
+
+      const lastCheckin = data.lastCheckin ? data.lastCheckin.toDate() : null;
+      let newStreak = data.streakCount ?? 0;
+
+      if (!lastCheckin) {
+        newStreak = 1;
+      } else {
+        const diff = differenceInCalendarDays(today, lastCheckin);
+        if (diff === 1) newStreak++;
+        if (diff > 1) newStreak = 1;
+      }
+
+      await setDoc(userRef, {
+        streakCount: newStreak,
+        lastCheckin: serverTimestamp(),
+        hasCheckedInToday: true
+      }, { merge: true });
+
+      setStreak(newStreak);
+      setHasCheckedInToday(true);
+      setSelectedPhoto(null);
+
+      showPanel("Day Complete!", `You completed both check-ins! Streak: ${newStreak}`);
+
+      if (milestones.includes(newStreak)) {
+        setShowMilestoneModal(true);
+        setTimeout(() => setShowMilestoneModal(false), 15000);
+      }
+
+      await scheduleHourlyReminders();
+    } catch (err) {
+      console.error("hard mode error:", err);
+      showError("Error", "Failed to check in.");
+    }
+
+    setCheckingIn(false);
+  };
+
+  // ---- Photo helpers ----
+
+  const getTodayPhotoUri = (type: 'single' | 'morning' | 'evening' = 'single'): string | undefined => {
     const today = format(new Date(), 'yyyy-MM-dd');
     const photoKey = type === 'single' ? today : `${today}_${type}`;
     return streakPhotos[photoKey];
   };
 
-  const getPhotoForDate = (date: Date, type: string = 'single'): string | undefined => {
+  const getPhotoForDate = (
+    date: Date,
+    type: 'single' | 'morning' | 'evening' = 'single'
+  ): string | undefined => {
+
     const dateStr = format(date, 'yyyy-MM-dd');
-    const photoKey = type === 'single' ? dateStr : `${dateStr}_${type}`;
-    return streakPhotos[photoKey];
+
+    // --- HARD MODE KEYS ---
+    if (type === 'morning') return streakPhotos[`${dateStr}_morning`];
+    if (type === 'evening') return streakPhotos[`${dateStr}_evening`];
+
+    // --- EASY MODE KEY ---
+    const single = streakPhotos[dateStr];
+    if (single) return single;
+
+    // --- FALLBACK: if specific type missing, return anything available ---
+    return (
+      streakPhotos[`${dateStr}_morning`] ||
+      streakPhotos[`${dateStr}_evening`] ||
+      single
+    );
   };
+
 
   const removePhoto = (): void => {
     setSelectedPhoto(null);
   };
 
+  // ---- Button / UI state helpers ----
+
   const canCheckIn = (): boolean => {
+    const fullyCheckedInToday =
+      hasCheckedInToday ||
+      (morningCheckIn.completed && eveningCheckIn.completed);
+
+    if (fullyCheckedInToday) return false;
+
     if (!isHardMode) {
       return !hasCheckedInToday && selectedPhoto !== null;
+    }
+
+    if (currentCheckInType === "morning") {
+      return !morningCheckIn.completed && selectedPhoto !== null;
     } else {
-      if (currentCheckInType === 'morning') {
-        return !morningCheckIn.completed && selectedPhoto !== null;
-      } else {
-        return !eveningCheckIn.completed && selectedPhoto !== null;
-      }
+      return !eveningCheckIn.completed && selectedPhoto !== null;
     }
   };
 
+
   const getCheckInButtonText = (): string => {
-    if (checkingIn || isUploading) {
-      return isUploading ? "Saving..." : "Checking in...";
+    const fullyCheckedInToday =
+      hasCheckedInToday ||
+      (morningCheckIn.completed && eveningCheckIn.completed);
+
+    if (fullyCheckedInToday) {
+      return "Already Checked In";
     }
-    
+
     if (!selectedPhoto) {
       return "Upload Photo First";
     }
-    
+
     if (!isHardMode) {
-      return hasCheckedInToday ? "Checked in" : "Check-in";
-    } else {
-      if (currentCheckInType === 'morning') {
-        return morningCheckIn.completed ? "Morning Complete" : "Morning Check-in";
-      } else {
-        return eveningCheckIn.completed ? "Evening Complete" : "Evening Check-in";
-      }
+      return "Check-in";
     }
+
+    return currentCheckInType === 'morning'
+      ? (morningCheckIn.completed ? "Morning Complete" : "Morning Check-in")
+      : (eveningCheckIn.completed ? "Evening Complete" : "Evening Check-in");
   };
 
+
   const shouldShowPhotoUpload = (): boolean => {
-    if (!isHardMode) {
-      return !hasCheckedInToday;
-    } else {
-      if (currentCheckInType === 'morning') {
-        return !morningCheckIn.completed;
-      } else {
-        return !eveningCheckIn.completed;
-      }
-    }
+    const fullyCheckedInToday =
+      hasCheckedInToday ||
+      (morningCheckIn.completed && eveningCheckIn.completed);
+
+    if (fullyCheckedInToday) return false;
+
+    if (!isHardMode) return !hasCheckedInToday;
+
+    return currentCheckInType === "morning"
+      ? !morningCheckIn.completed
+      : !eveningCheckIn.completed;
   };
+
 
   const getCurrentPhoto = (): string | null | undefined => {
     if (!isHardMode) {
@@ -690,45 +954,27 @@ const StreakScreen: React.FC = () => {
       }
     }
   };
-  
-  const saveStreakToFirestore = async (
-    streakCount: number, 
-    morningCheckIn: CheckInData, 
-    eveningCheckIn: CheckInData
-  ): Promise<void> => {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    const userRef = doc(db, 'users', user.uid);
-
-    try {
-      await setDoc(userRef, {
-        streakCount: streakCount,
-        lastCheckin: serverTimestamp(),
-        dailyCheckIns: {
-          morning: morningCheckIn,
-          evening: eveningCheckIn
-        }
-      }, { merge: true });
-    } catch (error) {
-      console.error('Error saving streak to Firestore:', error);
-    }
-  };
 
   const openPhotoViewer = (date: Date): void => {
-    const dateStr = format(date, 'yyyy-MM-dd');
-    if (checkedInDates.has(dateStr)) {
-      setViewerDate(date);
-      setShowPhotoViewer(true);
-      setShowCalendar(false);
-    }
+    const morning = getPhotoForDate(date, 'morning');
+    const evening = getPhotoForDate(date, 'evening');
+    const single = getPhotoForDate(date, 'single');
+
+    const hasAnyPhoto = morning || evening || single;
+
+    if (!hasAnyPhoto) return;  // absolutely empty → block
+
+    setViewerDate(date);
+    setShowPhotoViewer(true);
+    setShowCalendar(false);
   };
+
 
   const navigateViewerDate = (direction: 'prev' | 'next'): void => {
     const sortedDates = Array.from(checkedInDates).sort();
     const currentDateStr = format(viewerDate, 'yyyy-MM-dd');
     const currentIndex = sortedDates.indexOf(currentDateStr);
-    
+
     if (direction === 'prev' && currentIndex > 0) {
       setViewerDate(new Date(sortedDates[currentIndex - 1]));
     } else if (direction === 'next' && currentIndex < sortedDates.length - 1) {
@@ -740,7 +986,7 @@ const StreakScreen: React.FC = () => {
     const sortedDates = Array.from(checkedInDates).sort();
     const currentDateStr = format(viewerDate, 'yyyy-MM-dd');
     const currentIndex = sortedDates.indexOf(currentDateStr);
-    
+
     if (direction === 'prev') {
       return currentIndex > 0;
     } else {
@@ -748,314 +994,165 @@ const StreakScreen: React.FC = () => {
     }
   };
 
-  const renderPhotoViewer = (): JSX.Element => {
-    const photo = getPhotoForDate(viewerDate, 'single');
-    const morningPhoto = getPhotoForDate(viewerDate, 'morning');
-    const eveningPhoto = getPhotoForDate(viewerDate, 'evening');
-    const hasHardModePhotos = morningPhoto || eveningPhoto;
+  const RollingNumber: React.FC<{ value: number; color?: string }> = ({ value, color = "#5C6BC0" }) => {
+    const [current, setCurrent] = useState<number>(value);
+    const [next, setNext] = useState<number>(value);
+    const anim = useRef(new Animated.Value(0)).current;
+    const height = 70;
+
+    useEffect(() => {
+      if (value === current) return;
+
+      setNext(value);
+      anim.setValue(0);
+
+      Animated.timing(anim, {
+        toValue: -height,
+        duration: 350,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(() => {
+        setCurrent(value);
+        anim.setValue(0);
+      });
+    }, [value]);
 
     return (
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={showPhotoViewer}
-        onRequestClose={() => setShowPhotoViewer(false)}
-      >
-        <View style={{ 
-          flex: 1, 
-          backgroundColor: 'rgba(0,0,0,0.9)',
-          justifyContent: 'center',
-          alignItems: 'center'
-        }}>
-          <View style={{
-            position: 'absolute',
-            top: 50,
-            left: 0,
-            right: 0,
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            paddingHorizontal: 20,
-            zIndex: 10
-          }}>
-            <Text style={{ 
-              fontSize: 20, 
-              fontWeight: 'bold', 
-              color: 'white' 
-            }}>
-              {format(viewerDate, 'MMMM d, yyyy')}
-            </Text>
-            <TouchableOpacity 
-              onPress={() => setShowPhotoViewer(false)}
-              style={{ padding: 8 }}
-            >
-              <Ionicons name="close" size={32} color="white" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}>
-            {hasHardModePhotos ? (
-              <View style={{ width: '100%' }}>
-                {morningPhoto && (
-                  <View style={{ marginBottom: 20 }}>
-                    <Text style={{ color: 'white', fontSize: 16, fontWeight: '600', marginBottom: 8, textAlign: 'center' }}>
-                      Morning Check-in
-                    </Text>
-                    <Image 
-                      source={{ uri: morningPhoto }} 
-                      style={{ 
-                        width: Dimensions.get('window').width - 40,
-                        height: (Dimensions.get('window').width - 40) * 0.75,
-                        borderRadius: 12
-                      }}
-                      resizeMode="cover"
-                    />
-                  </View>
-                )}
-                {eveningPhoto && (
-                  <View>
-                    <Text style={{ color: 'white', fontSize: 16, fontWeight: '600', marginBottom: 8, textAlign: 'center' }}>
-                      Evening Check-in
-                    </Text>
-                    <Image 
-                      source={{ uri: eveningPhoto }} 
-                      style={{ 
-                        width: Dimensions.get('window').width - 40,
-                        height: (Dimensions.get('window').width - 40) * 0.75,
-                        borderRadius: 12
-                      }}
-                      resizeMode="cover"
-                    />
-                  </View>
-                )}
-              </View>
-            ) : photo ? (
-              <Image 
-                source={{ uri: photo }} 
-                style={{ 
-                  width: Dimensions.get('window').width - 40,
-                  height: (Dimensions.get('window').width - 40) * 0.75,
-                  borderRadius: 12
-                }}
-                resizeMode="cover"
-              />
-            ) : (
-              <Text style={{ color: 'white', fontSize: 16 }}>No photo available</Text>
-            )}
-          </View>
-
-          <View style={{
-            position: 'absolute',
-            bottom: 50,
-            left: 0,
-            right: 0,
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            paddingHorizontal: 20
-          }}>
-            <TouchableOpacity
-              onPress={() => navigateViewerDate('prev')}
-              disabled={!canNavigateViewer('prev')}
-              style={{
-                padding: 16,
-                backgroundColor: canNavigateViewer('prev') ? 'rgba(255,255,255,0.2)' : 'rgba(128,128,128,0.2)',
-                borderRadius: 50
-              }}
-            >
-              <Ionicons name="chevron-back" size={32} color="white" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              onPress={() => navigateViewerDate('next')}
-              disabled={!canNavigateViewer('next')}
-              style={{
-                padding: 16,
-                backgroundColor: canNavigateViewer('next') ? 'rgba(255,255,255,0.2)' : 'rgba(128,128,128,0.2)',
-                borderRadius: 50
-              }}
-            >
-              <Ionicons name="chevron-forward" size={32} color="white" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    );
-  };
-
-  const renderCalendar = (): JSX.Element => {
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(currentMonth);
-    const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
-    
-    const startDay = monthStart.getDay();
-    const emptyCells: null[] = Array(startDay).fill(null);
-    
-    const allCells: (Date | null)[] = [...emptyCells, ...days];
-    
-    // Dark mode colors for calendar
-    const calTextColor = darkMode ? '#ffffff' : '#374151';
-    const calSecondaryTextColor = darkMode ? '#cbd5e0' : '#6B7280';
-    const calCardBg = bgColor;
-    
-    return (
-      <View style = {{  flex: 1, backgroundColor: bgColor }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <TouchableOpacity
-            onPress={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))}
-            style={{ padding: 8 }}
+      <View style={{ height, overflow: "hidden" }}>
+        <Animated.View
+          style={{
+            transform: [{ translateY: anim }],
+          }}
+        >
+          <Text
+            style={{
+              height,
+              fontSize: 60,
+              fontWeight: "bold",
+              color,
+              textAlign: "center",
+            }}
           >
-            <Ionicons name="chevron-back" size={24} color={calTextColor} />
-          </TouchableOpacity>
-          
-          <Text style={{ fontSize: 18, fontWeight: 'bold', color: calTextColor }}>
-            {format(currentMonth, 'MMMM yyyy')}
+            {current}
           </Text>
-          
-          <TouchableOpacity
-            onPress={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))}
-            style={{ padding: 8 }}
+
+          <Text
+            style={{
+              height,
+              fontSize: 60,
+              fontWeight: "bold",
+              color,
+              textAlign: "center",
+            }}
           >
-            <Ionicons name="chevron-forward" size={24} color={calTextColor} />
-          </TouchableOpacity>
-        </View>
-        
-        <View style={{ flexDirection: 'row', marginBottom: 10 }}>
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-            <View key={day} style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={{ fontSize: 12, fontWeight: '600', color: calSecondaryTextColor }}>{day}</Text>
-            </View>
-          ))}
-        </View>
-        
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-          {allCells.map((day, index) => {
-            if (!day) {
-              return <View key={`empty-${index}`} style={{ width: '14.28%', height: 40 }} />;
-            }
-            
-            const dayString = format(day, 'yyyy-MM-dd');
-            const isCheckedIn = checkedInDates.has(dayString);
-            const isToday = isSameDay(day, new Date());
-            
-            return (
-              <TouchableOpacity
-                key={index}
-                style={{ width: '14.28%', height: 40, padding: 2 }}
-                onPress={() => isCheckedIn ? openPhotoViewer(day) : null}
-                disabled={!isCheckedIn}
-              >
-                <View style={{
-                  flex: 1,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: isCheckedIn ? '#22c55e' : (isToday ? (bgColor) : 'transparent'),
-                  borderRadius: 4,
-                  borderWidth: isToday ? 1 : 0,
-                  borderColor: '#5C6BC0',
-                  shadowColor: isCheckedIn ? '#22c55e' : 'transparent',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.3,
-                  shadowRadius: 8,
-                  elevation: 5,
-                }}>
-                  <Text style={{
-                    fontSize: 14,
-                    color: isCheckedIn ? 'white' : calTextColor,
-                    fontWeight: isToday ? 'bold' : 'normal'
-                  }}>
-                    {day.getDate()}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-        
-        <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 20, gap: 20 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ width: 16, height: 16, backgroundColor: '#22c55e', borderRadius: 3, marginRight: 6 }} />
-            <Text style={{ fontSize: 12, color: calSecondaryTextColor }}>Checked in (tap to view)</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View style={{ width: 16, height: 16, backgroundColor: calCardBg, borderRadius: 3, marginRight: 6, borderWidth: 1, borderColor: '#5C6BC0' }} />
-            <Text style={{ fontSize: 12, color: calSecondaryTextColor }}>Today</Text>
-          </View>
-        </View>
+            {next}
+          </Text>
+        </Animated.View>
       </View>
     );
   };
+
   const renderProgressToast = () => {
-  if (!showProgressToast || !nextMilestone) return null;
+    if (!showProgressToast || !nextMilestone) return null;
 
-  const barWidth = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0%", "100%"]
-  });
+    const barWidth = progressAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ["0%", "100%"]
+    });
 
-  return (
-    <Animated.View style={{
-      position: "absolute",
-      top: slideAnim,
-      alignSelf: "center",
-      width: "90%",
-      backgroundColor: bgColor,
-      padding: 25  ,
-      borderRadius: 14,
-      zIndex: 999,
-      shadowColor: primaryColor,
-      shadowOpacity: 0.3,
-      shadowRadius: 12,
-      elevation: 10,
-    }}>
-      <Text style={{ fontSize: 18, fontWeight: "bold", color: textColor, marginBottom: 6 }}>
-        🔥 Daily Check-in!
-      </Text>
+    const bgColor = darkMode ? '#1a1f3a' : 'white';
+    const textColor = darkMode ? '#ffffff' : '#374151';
+    const secondaryTextColor = darkMode ? '#cbd5e0' : '#6B7280';
+    const primaryColor = '#5C6BC0';
 
-      <View style={{
-        width: "100%",
-        height: 14,
-        backgroundColor: darkMode ? "#2d2f45" : "#e5e7eb",
-        borderRadius: 10,
-        overflow: "hidden",
+    return (
+      <Animated.View style={{
+        position: "absolute",
+        top: slideAnim,
+        alignSelf: "center",
+        width: "90%",
+        backgroundColor: bgColor,
+        padding: 25,
+        borderRadius: 14,
+        zIndex: 999,
+        shadowColor: primaryColor,
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        elevation: 10,
       }}>
-        <Animated.View style={{
-          height: "100%",
-          backgroundColor: primaryColor,
+        <Text style={{ fontSize: 18, fontWeight: "bold", color: textColor, marginBottom: 6 }}>
+          🔥 Daily Check-in!
+        </Text>
+
+        <View style={{
+          width: "100%",
+          height: 14,
+          backgroundColor: darkMode ? "#2d2f45" : "#e5e7eb",
           borderRadius: 10,
-          width: barWidth,
-        }} />
-      </View>
+          overflow: "hidden",
+        }}>
+          <Animated.View style={{
+            height: "100%",
+            backgroundColor: primaryColor,
+            borderRadius: 10,
+            width: barWidth,
+          }} />
+        </View>
 
-      <Text style={{ color: secondaryTextColor, textAlign: "center", marginTop: 6 }}>
-        {nextMilestone - streak} more days to {nextMilestone}! 🏆
-      </Text>
-    </Animated.View>
-  );
-};
+        <Text style={{ color: secondaryTextColor, textAlign: "center", marginTop: 6 }}>
+          {nextMilestone - streak} more days to {nextMilestone}! 🏆
+        </Text>
+      </Animated.View>
+    );
+  };
 
 
+const calendarCheckinDetails: Record<string, CheckinDetail> = { ...checkinDetails };
 
-  // Dark mode colors
+  checkedInDates.forEach(dateStr => {
+    // If hard-mode data already exists, keep it
+    if (calendarCheckinDetails[dateStr]) return;
+
+    // EASY MODE fallback: Check if single photo exists for this day
+    const singlePhoto = streakPhotos[dateStr];
+
+    if (singlePhoto) {
+      // Easy-mode: treat as both morning + evening complete
+      calendarCheckinDetails[dateStr] = {
+        morningDone: true,
+        eveningDone: true,
+        completedHardMode: true, // THIS controls the green highlight background
+      };
+    } else {
+      // No photos on this device (completed check-in on another device)
+      calendarCheckinDetails[dateStr] = {
+        morningDone: false,
+        eveningDone: false,
+        completedHardMode: false,
+      };
+    }
+  }); 
+
   const bgColor = darkMode ? '#1a1f3a' : 'white';
   const textColor = darkMode ? '#ffffff' : '#374151';
   const secondaryTextColor = darkMode ? '#cbd5e0' : '#6B7280';
   const cardBg = darkMode ? '#2d3748' : '#f3f4f6';
-  const borderColor = darkMode ? '#4a5568' : '#e5e7eb';
-  const iconBg = darkMode ? '#374151' : '#e0e7ff';
-  const planBg = darkMode ? '#374151' : '#374151';
-  const modalBg = darkMode ? '#2d3748' : 'white';
   const primaryColor = '#5C6BC0';
 
-  return (
+  if (streakLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" , backgroundColor: bgColor}}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
 
+  return (
     <View style={{ flex: 1, backgroundColor: bgColor }}>
-      <ScrollView style={{flex:1, backgroundColor: bgColor }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1, backgroundColor: bgColor }} showsVerticalScrollIndicator={false}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, paddingTop: 20, marginTop: 80 }}>
-          <Text style={{ fontSize: 60, fontWeight: 'bold', color: primaryColor, marginBottom: 16, shadowColor: primaryColor,
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.4,
-                shadowRadius: 12,
-                elevation: 6, }}>{streak}</Text>
+          <RollingNumber value={streak} color={primaryColor} />
+
           <Text style={{ fontSize: 24, fontWeight: '600', color: textColor, marginBottom: 8 }}>
             Day{streak !== 1 ? 's' : ''} Streak 🔥
           </Text>
@@ -1063,9 +1160,12 @@ const StreakScreen: React.FC = () => {
           <Text style={{ fontSize: 16, color: secondaryTextColor, marginBottom: 8 }}>
             {isHardMode ? 'Hard Mode' : 'Easy Mode'}
           </Text>
+
           {streak > 0 && (
             <Text style={{ fontSize: 18, color: secondaryTextColor, marginBottom: 32 }}>
-              {hasCheckedInToday ? "Keep it up! You're doing great!" : `Check in to keep the ${streak}-day streak going!`}
+              {hasCheckedInToday
+                ? "Keep it up! You're doing great!"
+                : `Check in to keep the ${streak}-day streak going!`}
             </Text>
           )}
 
@@ -1086,7 +1186,7 @@ const StreakScreen: React.FC = () => {
                   color: currentCheckInType === 'morning' ? 'white' : textColor,
                   fontWeight: '600'
                 }}>
-                  Morning {morningCheckIn.completed ? '✓' : ''}
+                  Morning {morningCheckIn.completed || hasCheckedInToday ? '✓' : ''}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1104,7 +1204,7 @@ const StreakScreen: React.FC = () => {
                   color: currentCheckInType === 'evening' ? 'white' : textColor,
                   fontWeight: '600'
                 }}>
-                  Evening {eveningCheckIn.completed ? '✓' : ''}
+                  Evening {eveningCheckIn.completed || hasCheckedInToday ? '✓' : ''}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1114,28 +1214,37 @@ const StreakScreen: React.FC = () => {
             {!shouldShowPhotoUpload() && getCurrentPhoto() ? (
               <View style={{ alignItems: 'center' }}>
                 <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8, color: textColor }}>
-                  {isHardMode ? `${currentCheckInType.charAt(0).toUpperCase() + currentCheckInType.slice(1)}'s Photo` : "Today's Photo"}
+                  {isHardMode
+                    ? `${currentCheckInType.charAt(0).toUpperCase() + currentCheckInType.slice(1)}'s Photo`
+                    : "Today's Photo"}
                 </Text>
-                <Image 
-                  source={{ uri: getCurrentPhoto()! }} 
+                <Image
+                  source={{ uri: getCurrentPhoto()! }}
                   style={{ width: 160, height: 160, borderRadius: 8, marginBottom: 16 }}
                   resizeMode="cover"
                 />
               </View>
             ) : selectedPhoto ? (
               <View style={{ alignItems: 'center' }}>
-                <Image 
-                  source={{ uri: selectedPhoto.uri }} 
+                <Image
+                  source={{ uri: selectedPhoto.uri }}
                   style={{ width: 160, height: 160, borderRadius: 8, marginBottom: 16 }}
                   resizeMode="cover"
                 />
                 <TouchableOpacity
                   onPress={removePhoto}
-                  style={{ backgroundColor: '#ef4444', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, marginBottom: 8, shadowColor: '#ef4444',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.3,
-                shadowRadius: 8,
-                elevation: 5, }}
+                  style={{
+                    backgroundColor: '#ef4444',
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 8,
+                    marginBottom: 8,
+                    shadowColor: '#ef4444',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 8,
+                    elevation: 5,
+                  }}
                 >
                   <Text style={{ color: 'white', fontWeight: '600' }}>Remove Photo</Text>
                 </TouchableOpacity>
@@ -1160,7 +1269,7 @@ const StreakScreen: React.FC = () => {
               >
                 <Ionicons name="camera" size={40} color={secondaryTextColor} />
                 <Text style={{ color: secondaryTextColor, marginTop: 8, textAlign: 'center' }}>
-                  {shouldShowPhotoUpload() 
+                  {shouldShowPhotoUpload()
                     ? `Tap to upload a photo\n(Required for ${isHardMode ? currentCheckInType : ''} check-in)`
                     : 'Already checked in'
                   }
@@ -1186,7 +1295,7 @@ const StreakScreen: React.FC = () => {
               shadowOffset: { width: 0, height: 4 },
               shadowOpacity: 0.4,
               shadowRadius: 12,
-              elevation: 6, 
+              elevation: 6,
             }}
           >
             {checkingIn || isUploading ? (
@@ -1203,54 +1312,55 @@ const StreakScreen: React.FC = () => {
             )}
           </TouchableOpacity>
         </View>
-        
-        <View style={{ marginTop: 30, paddingHorizontal: 16, backgroundColor: bgColor}}>
+
+        <View style={{ marginTop: 30, paddingHorizontal: 16, backgroundColor: bgColor }}>
           <UVLevelPanel />
         </View>
-        
 
-        <Modal
-          animationType="fade"
-          transparent={true}
+        <CalendarModal
           visible={showCalendar}
-          onRequestClose={() => setShowCalendar(false)}
-        >
-          <View style={{ 
-            flex: 1, 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            backgroundColor: 'rgba(0,0,0,0.5)' 
-            
-          }}>
-            <View style={{ 
-              backgroundColor: bgColor, 
-              padding: 20, 
-              borderRadius: 12, 
-              width: '90%',
-              maxHeight: '80%'
-            }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                <Text style={{ fontSize: 24, fontWeight: 'bold', color: textColor }}>Streak Calendar</Text>
-                <TouchableOpacity onPress={() => setShowCalendar(false)}>
-                  <Ionicons name="close" size={24} color={textColor} />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {renderCalendar()}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
+          onClose={() => setShowCalendar(false)}
+          currentMonth={currentMonth}
+          onMonthChange={setCurrentMonth}
+          checkedInDates={checkedInDates}
+          checkinDetails={calendarCheckinDetails}
+          onDatePress={openPhotoViewer}
+          darkMode={darkMode}
+          getPhotoForDate={getPhotoForDate}
+        />
 
-        {renderPhotoViewer()}
+        <PhotoViewer
+          visible={showPhotoViewer}
+          onClose={() => setShowPhotoViewer(false)}
+          viewerDate={viewerDate}
+          getPhotoForDate={getPhotoForDate}
+          onNavigate={navigateViewerDate}
+          canNavigate={canNavigateViewer}
+        />
+
+        <ErrorModal
+          visible={errorVisible}
+          message={errorMessage}
+          title={errorTitle}
+          onClose={() => setErrorVisible(false)}
+          darkMode={darkMode}
+        />
+
+        <MessagePanel
+          visible={panelVisible}
+          title={panelTitle}
+          message={panelMessage}
+          actions={panelActions}
+          onClose={hidePanel}
+          darkMode={darkMode}
+        />
       </ScrollView>
-      
+
       <TouchableOpacity
         onPress={() => setShowCalendar(true)}
         style={{
           position: 'absolute',
-          top: 50,
+          top: 60,
           right: 20,
           zIndex: 10,
           padding: 12,
@@ -1260,12 +1370,13 @@ const StreakScreen: React.FC = () => {
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.4,
           shadowRadius: 12,
-          elevation: 6, 
+          elevation: 6,
         }}
       >
         <Ionicons name="calendar" size={28} color="white" />
       </TouchableOpacity>
-              <Modal
+
+      <Modal
         animationType="slide"
         transparent={true}
         visible={showMilestoneModal}
@@ -1275,37 +1386,83 @@ const StreakScreen: React.FC = () => {
           flex: 1,
           justifyContent: 'center',
           alignItems: 'center',
-          backgroundColor: 'rgba(0,0,0,0.6)'
+          backgroundColor: 'rgba(0,0,0,0.7)'
         }}>
           <View style={{
             backgroundColor: bgColor,
-            padding: 24,
-            borderRadius: 16,
-            width: '80%',
+            padding: 32,
+            borderRadius: 20,
+            width: '85%',
             alignItems: 'center',
             shadowColor: primaryColor,
-            shadowOpacity: 0.5,
-            shadowRadius: 14
+            shadowOpacity: 0.6,
+            shadowRadius: 20,
+            elevation: 10,
+            borderWidth: 2,
+            borderColor: primaryColor
           }}>
-            <Text style={{ fontSize: 34 }}>🏆</Text>
-            <Text style={{ fontSize: 22, fontWeight: 'bold', color: textColor, marginBottom: 10 }}>
+            <View style={{
+              backgroundColor: primaryColor,
+              width: 80,
+              height: 80,
+              borderRadius: 40,
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginBottom: 20
+            }}>
+              <Text style={{ fontSize: 48 }}>🏆</Text>
+            </View>
+
+            <Text style={{ fontSize: 28, fontWeight: 'bold', color: primaryColor, marginBottom: 12 }}>
               Congratulations!
             </Text>
 
-            <Text style={{ fontSize: 18, color: textColor, marginBottom: 20 }}>
-              You hit a {streak}-day streak!
+            <Text style={{ fontSize: 20, color: textColor, marginBottom: 8, textAlign: 'center' }}>
+              You've reached a
+            </Text>
+
+            <Text style={{ fontSize: 36, fontWeight: 'bold', color: primaryColor, marginBottom: 20 }}>
+              {streak}-Day Streak!
             </Text>
 
             {nextMilestone && (
-              <Text style={{ fontSize: 16, color: secondaryTextColor }}>
-                Next reward: {nextMilestone} days 🔥
-              </Text>
+              <View style={{
+                backgroundColor: darkMode ? '#2d3748' : '#f3f4f6',
+                paddingVertical: 12,
+                paddingHorizontal: 20,
+                borderRadius: 12,
+                marginBottom: 24
+              }}>
+                <Text style={{ fontSize: 16, color: secondaryTextColor, textAlign: 'center' }}>
+                  Next milestone: {nextMilestone} days 🔥
+                </Text>
+              </View>
             )}
+
+            <TouchableOpacity
+              onPress={() => setShowMilestoneModal(false)}
+              style={{
+                backgroundColor: primaryColor,
+                paddingVertical: 14,
+                paddingHorizontal: 40,
+                borderRadius: 12,
+                shadowColor: primaryColor,
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.4,
+                shadowRadius: 8,
+                elevation: 5
+              }}
+            >
+              <Text style={{ color: 'white', fontSize: 18, fontWeight: '600' }}>
+                Awesome!
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
-      <View style={{ position: "absolute", top: 25, left: 0, right: 0, zIndex: 999 }}>
-      {renderProgressToast()}
+
+      <View style={{ position: "absolute", top: 30, left: 0, right: 0, zIndex: 999 }}>
+        {renderProgressToast()}
       </View>
     </View>
   );

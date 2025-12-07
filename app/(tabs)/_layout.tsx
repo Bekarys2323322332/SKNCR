@@ -1,123 +1,143 @@
-import { images } from "@/components/images";
+import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
-import { Animated, StyleSheet, TouchableOpacity, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { loadDarkMode } from "../utils/storage";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, StyleSheet, View } from "react-native";
+import { images } from "../../utils/images";
+import { loadDarkMode } from "../../utils/storage";
+
+const PRIMARY_BLUE = "#5C6BC0";
 
 type TabIconProps = {
   focused: boolean;
   icon: any;
-  animatedTint: any; // Animated value for tintColor
+  anim: Animated.Value;
 };
 
-function TabIcon({ focused, icon, animatedTint }: TabIconProps) {
+const TabIcon = React.memo(function TabIcon({ focused, icon, anim }: TabIconProps) {
+  
+  const highlightOpacity = focused
+    ? anim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] })
+    : 0; // <-- simple no-animation fade for unfocused
+
+  const tint = focused ? "#ffffff" : PRIMARY_BLUE;
+
   return (
-    <Animated.Image
-      source={icon}
-      style={{
-        width: focused ? 28 : 24,
-        height: focused ? 28 : 24,
-        tintColor: animatedTint, // animated color
-      }}
-      resizeMode="contain"
-    />
+    <View className="justify-center items-center mt-3 w-14 h-14">
+
+      <Animated.View
+        style={{
+          position: "absolute",
+          width: 44,
+          height: 44,
+          borderRadius: 24,
+          backgroundColor: PRIMARY_BLUE,
+          opacity: highlightOpacity,
+        }}
+      />
+
+      <Animated.Image
+        source={icon}
+        resizeMode="contain"
+        style={{
+          width: focused ? 28 : 24,
+          height: focused ? 28 : 24,
+          tintColor: tint,
+        }}
+      />
+    </View>
   );
-}
+});
+
 
 export default function TabsLayout() {
   const [darkMode, setDarkMode] = useState(false);
-  const anim = useRef(new Animated.Value(0)).current;
-  const insets = useSafeAreaInsets();
 
+  // Smooth animation value shared across UI
+  const anim = useRef(new Animated.Value(0)).current;
+
+  // animate dark mode transition
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: darkMode ? 1 : 0,
+      duration: 250,
+      useNativeDriver: false,
+    }).start();
+  }, [darkMode]);
+
+  // sync dark mode from storage
   useEffect(() => {
     const interval = setInterval(() => loadDarkMode().then(setDarkMode), 100);
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: darkMode ? 1 : 0,
-      duration: 300,
-      useNativeDriver: false, // must be false for colors
-    }).start();
-  }, [darkMode]);
-
-  // Animated colors
+  // Animated tab bar background
   const animatedBg = anim.interpolate({
     inputRange: [0, 1],
-    outputRange: ["rgba(255,255,255,0.85)", "rgba(36,43,69,0.85)"],
-  });
-
-  const iconColor = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["#5C6BC0", "#ffffff"], // light -> dark mode icon colors
-  });
-
-  const secondaryIconColor = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["#6B7280", "#cbd5e0"], // unfocused icons
+    outputRange: ["white", "#1a1f3a"],
   });
 
   return (
-    <View style={{ flex: 1 }}>
-      <StatusBar style={darkMode ? "light" : "dark"} translucent={true} />
+    <>
+    <StatusBar style={darkMode ? "light" : "dark"} animated />
+    <Tabs
+      screenOptions={{
+        tabBarShowLabel: false,
+        animation: "fade",
+        lazy: true,
 
-      <Animated.View
-        style={[StyleSheet.absoluteFillObject, { backgroundColor: darkMode ? "#1a1f3a" : "#ffffff" }]}
+        // Transparent because we use tabBarBackground
+        tabBarStyle: {
+          height: 70,
+          borderTopWidth: 0,
+          shadowOpacity: 0,
+          backgroundColor: "transparent",
+        },
+
+        // Animated + blurred background
+        tabBarBackground: () => (
+          <Animated.View
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: animatedBg }]}
+          >
+            <BlurView
+              tint={darkMode ? "dark" : "light"}
+              intensity={40}
+              style={StyleSheet.absoluteFillObject}
+            />
+          </Animated.View>
+        ),
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{
+          headerShown: false,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon focused={focused} icon={images.water} anim={anim} />
+          ),
+        }}
       />
 
-      <Tabs
-        tabBar={(props) => (
-          <Animated.View
-            style={{
-              position: "absolute",
-              bottom: 10 + insets.bottom,
-              alignSelf: "center",
-              height: 50,
-              width: 250, // set your desired width
-              borderRadius: 40,
-              flexDirection: "row",
-              justifyContent: "space-around",
-              alignItems: "center",
-              elevation: 10,
-              shadowColor: "#000",
-              shadowOpacity: 0.1,
-              shadowRadius: 10,
-              backgroundColor: animatedBg,
-            }}
-          >
-            {props.state.routes.map((route, index) => {
-              const focused = props.state.index === index;
-              const icon =
-                route.name === "index"
-                  ? images.water
-                  : route.name === "scanbar"
-                  ? images.scan
-                  : images.profile;
+      <Tabs.Screen
+        name="scanbar"
+        options={{
+          headerShown: false,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon focused={focused} icon={images.scan} anim={anim} />
+          ),
+        }}
+      />
 
-              return (
-                <TouchableOpacity
-                  key={route.key}
-                  onPress={() => props.navigation.navigate(route.name)}
-                  activeOpacity={0.7}
-                >
-                  <TabIcon
-                    focused={focused}
-                    icon={icon}
-                    animatedTint={focused ? iconColor : secondaryIconColor}
-                  />
-                </TouchableOpacity>
-              );
-            })}
-          </Animated.View>
-        )}
-      >
-        <Tabs.Screen name="index" options={{ headerShown: false }} />
-        <Tabs.Screen name="scanbar" options={{ headerShown: false }} />
-        <Tabs.Screen name="profile" options={{ headerShown: false }} />
-      </Tabs>
-    </View>
+      <Tabs.Screen
+        name="profile"
+        options={{
+          headerShown: false,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon focused={focused} icon={images.profile} anim={anim} />
+          ),
+        }}
+      />
+    </Tabs>
+    </>
   );
 }
