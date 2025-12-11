@@ -1,16 +1,13 @@
-
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Stack } from "expo-router";
+import { Redirect, Stack } from "expo-router";
 import { useEffect, useState } from "react";
-import './globals.css';
-
+import "./globals.css";
 
 export default function RootLayout() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load onboarding + login state from storage
   useEffect(() => {
     const loadState = async () => {
       const logged = await AsyncStorage.getItem("isLoggedIn");
@@ -25,13 +22,18 @@ export default function RootLayout() {
   if (loading) return null;
 
   return (
-    <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+    <Stack screenOptions={{ headerShown: false }}>
+      {/* DECLARE YOUR GROUPS HERE */}
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+
+      {/* INITIAL ROUTE REDIRECTS */}
       {!isLoggedIn ? (
-        <Stack.Screen name="(auth)/login" />
+        <Redirect href="/(auth)/login" />
       ) : !isOnboarded ? (
-        <Stack.Screen name="(auth)/Skincare" />
+        <Redirect href="/(auth)/skincare" />
       ) : (
-        <Stack.Screen name="(tabs)" />
+        <Redirect href="/(tabs)" />
       )}
     </Stack>
   );

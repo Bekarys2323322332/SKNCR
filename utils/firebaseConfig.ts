@@ -3,14 +3,9 @@ import Constants from "expo-constants";
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
-
-// Firebase v12 removed RN TS types, but the runtime API still exists.
-// Expo SDK 53+ requires Firebase v12, so this is the correct setup.
-// @ts-ignore
-import {
-    getReactNativePersistence,
-    initializeAuth,
-} from "firebase/auth";
+// We’ll use getAuth as a safe fallback
+// @ts-ignore: TS defs for RN helpers are behind
+import { getAuth, getReactNativePersistence, initializeAuth } from "firebase/auth";
 
 const {
   FIREBASE_API_KEY,
@@ -21,6 +16,10 @@ const {
   FIREBASE_APP_ID,
 } = Constants.expoConfig?.extra ?? {};
 
+if (!FIREBASE_API_KEY) {
+  console.error("FIREBASE_API_KEY is missing from Expo extra!");
+}
+
 const firebaseConfig = {
   apiKey: FIREBASE_API_KEY,
   authDomain: FIREBASE_AUTH_DOMAIN,
@@ -30,27 +29,38 @@ const firebaseConfig = {
   appId: FIREBASE_APP_ID,
 };
 
-// -------------------------------
-// Initialize Firebase
-// -------------------------------
-let app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// -------------------------------
-// Initialize Auth with Persistence
-// -------------------------------
-// @ts-ignore - Firebase v12 removed types but function exists in JS runtime
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+// ---- SAFE AUTH INITIALIZATION ---------------------------------------
 
-// -------------------------------
-// Initialize Firestore
-// -------------------------------
+let _auth: ReturnType<typeof getAuth> | null = null;
+
+function createAuth() {
+  if (_auth) return _auth;
+
+  // If RN helper exists, use proper persistence (device / RN bundle)
+  // On Expo’s server build, this will be undefined → we fall back.
+  // @ts-ignore
+  if (typeof getReactNativePersistence === "function") {
+    // @ts-ignore
+    _auth = initializeAuth(app, {
+      // @ts-ignore
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } else {
+    // Fallback (web / server manifest): no RN persistence,
+    // but at least we don’t crash EAS build.
+    _auth = getAuth(app);
+  }
+
+  return _auth;
+}
+
+const auth = createAuth();
+
+// ---------------------------------------------------------------------
+
 const db = getFirestore(app);
-
-// -------------------------------
-// Initialize Storage
-// -------------------------------
 const storage = getStorage(app);
 
 export { app, auth, db, storage };
