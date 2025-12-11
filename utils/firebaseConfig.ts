@@ -1,20 +1,36 @@
-import { getApp, getApps, initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
+import { getApps, initializeApp } from "firebase/app";
+import {
+  getReactNativePersistence,
+  initializeAuth,
+} from "firebase/auth/react-native";
+
+
+const {
+  FIREBASE_API_KEY,
+  FIREBASE_AUTH_DOMAIN,
+  FIREBASE_PROJECT_ID,
+  FIREBASE_STORAGE_BUCKET,
+  FIREBASE_MESSAGING_SENDER_ID,
+  FIREBASE_APP_ID,
+} = Constants.expoConfig?.extra ?? {};
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDIvXeBxWeujRUXox23bsd4D6WxW1dBmXM",
-  authDomain: "skncr-d6201.firebaseapp.com",
-  projectId: "skncr-d6201",
-  storageBucket: "skncr-d6201.firebasestorage.app",
-  messagingSenderId: "614028536844",
-  appId: "1:614028536844:web:32df5767fba03a0d291229",
-  measurementId: "G-PWETXXTC8W",
+  apiKey: FIREBASE_API_KEY,
+  authDomain: FIREBASE_AUTH_DOMAIN,
+  projectId: FIREBASE_PROJECT_ID,
+  storageBucket: FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: FIREBASE_MESSAGING_SENDER_ID,
+  appId: FIREBASE_APP_ID,
 };
 
-const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+// Initialize app only once
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+// Initialize Auth with persistence
+export const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage),
+});
+
+export { app };
