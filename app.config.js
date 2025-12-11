@@ -64,11 +64,10 @@ export default {
       INCI_API_KEY: process.env.INCI_API_KEY,
       BACKEND_URL: process.env.BACKEND_URL,
       API_SECRET: process.env.API_SECRET,
-
-      router: {},
       eas: {
         projectId: "0195c19e-c669-48d5-9aff-e11f302dd0b0"
       }
+      
     }
   }
 };

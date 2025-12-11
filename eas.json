@@ -6,31 +6,13 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "env": {
-        "INCI_API_KEY": "XJODelREtsNpdPGydthsr1pRcSYc01gX",
-        "BACKEND_URL": "https://skncr2.onrender.com",
-        "UPCITEMDB_KEY": "YOUR_KEY_IF_YOU_USE_ONE",
-        "API_SECRET": "AMINAVERNIS"
-      }
+      "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal",
-      "env": {
-        "INCI_API_KEY": "XJODelREtsNpdPGydthsr1pRcSYc01gX",
-        "BACKEND_URL": "https://skncr2.onrender.com",
-        "UPCITEMDB_KEY": "YOUR_KEY_IF_YOU_USE_ONE",
-        "API_SECRET": "AMINAVERNIS"
-      }
+      "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true,
-      "env": {
-        "INCI_API_KEY": "XJODelREtsNpdPGydthsr1pRcSYc01gX",
-        "BACKEND_URL": "https://skncr2.onrender.com",
-        "UPCITEMDB_KEY": "YOUR_KEY_IF_YOU_USE_ONE",
-        "API_SECRET": "AMINAVERNIS"
-      }
+      "autoIncrement": true
     }
   },
   "submit": {
