@@ -1,13 +1,13 @@
-import { auth, db, storage } from "@/utils/firebaseConfig";
+
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import auth from "@react-native-firebase/auth";
+import firestore from "@react-native-firebase/firestore";
+import storage from "@react-native-firebase/storage";
 import { format } from "date-fns";
 import * as ImagePicker from "expo-image-picker";
 import * as Linking from "expo-linking";
 import { router, useFocusEffect } from "expo-router";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -25,6 +25,7 @@ import {
 import ErrorModal from "../../components/ErrorModal";
 import MessagePanel, { PanelAction } from "../../components/MessagePanel";
 import { loadDarkMode, resetPlan, saveDarkMode } from "../../utils/storage";
+
 
 
 
@@ -157,7 +158,8 @@ const Profile = () => {
     // 🔥 Always start fresh loading state when screen mounts
     setInfoLoading(true);
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribeAuth = auth().onAuthStateChanged((currentUser) => {
+
 
       // Kill old Firestore listener
       if (snapshotRef.current) {
@@ -177,13 +179,12 @@ const Profile = () => {
       setUser(currentUser);
 
       // Start Firestore snapshot
-      const userRef = doc(db, "users", currentUser.uid);
-      const uid = currentUser.uid;
+      const userRef = firestore().collection("users").doc(currentUser.uid);
+      const unsub = userRef.onSnapshot(async (snapshot) => {
+      if (!snapshot.exists()) return;
 
-      const unsub = onSnapshot(userRef, async (snapshot) => {
-        if (!snapshot.exists()) return;
-
-        const data = snapshot.data();
+      const data = snapshot.data() || {};
+      const uid = auth().currentUser?.uid;
 
         // Load all Firestore-backed values safely
         if (data.profilePic !== undefined) setProfilePic(data.profilePic);
@@ -328,11 +329,12 @@ const Profile = () => {
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
-      const imageRef = ref(storage, `profilePics/${user.uid}`);
-      await uploadBytes(imageRef, blob);
-      const downloadURL = await getDownloadURL(imageRef);
+      const imageRef = storage().ref(`profilePics/${user.uid}`);
+      await imageRef.put(blob);
+      const downloadURL = await imageRef.getDownloadURL();
+
       
-      await updateDoc(doc(db, "users", user?.uid!), {
+      await firestore().collection("users").doc(user.uid).update({
         profilePic: downloadURL,
       });
       
@@ -384,10 +386,11 @@ const Profile = () => {
     try {
       const now = Date.now();
 
-      await updateDoc(doc(db, "users", user.uid), {
+      await firestore().collection("users").doc(user.uid).update({
         name: trimmed,
-        lastNameChange: now, // 🔥 saved permanently in Firebase
+        lastNameChange: now,
       });
+
 
       setDisplayName(trimmed);
       setLastNameChange(now);
@@ -416,7 +419,7 @@ const Profile = () => {
           try {
             await resetPlan();
             if (user) {
-              await updateDoc(doc(db, "users", user.uid), {
+              await firestore().collection("users").doc(user.uid).update({
                 skincarePlan: null,
               });
             }
@@ -484,7 +487,7 @@ const Profile = () => {
               await AsyncStorage.setItem(`hardModeLastDisabledLocal_${user.uid}`, JSON.stringify(now));
 
               // Save to Firebase
-              updateDoc(doc(db, "users", user.uid), {
+              await firestore().collection("users").doc(user.uid).update({
                 hardMode: true,
                 hardModeLastDisabled: now, // 🔥 Cooldown starts here
               });
@@ -524,7 +527,7 @@ const Profile = () => {
                 setHardMode(false);
                 await AsyncStorage.setItem(`hardModeLocal_${user.uid}`, JSON.stringify(false));
 
-                updateDoc(doc(db, "users", user.uid), {
+                await firestore().collection("users").doc(user.uid).update({
                   hardMode: false,
                   // hardModeLastDisabled stays unchanged
                 });
@@ -547,7 +550,7 @@ const Profile = () => {
       snapshotRef.current();
       snapshotRef.current = null;
     }
-    await signOut(auth);
+    await auth().signOut();
     router.replace("/(auth)/login");
 
   } catch (e) {

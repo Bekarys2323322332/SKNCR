@@ -1,14 +1,8 @@
 import ErrorModal from "@/components/ErrorModal";
 import MessagePanel, { PanelAction } from "@/components/MessagePanel";
-import { auth, db } from "@/utils/firebaseConfig";
+import { authRN, db } from "@/utils/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-
-import {
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
-} from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -84,50 +78,51 @@ const signup = () => {
 
 
   const signUp = async () => {
-  if (password !== confirmPassword) {
-    showError("Input Error", "Passwords do not match");
-    return;
-  }
-
-  setLoading(true);
-    try {
-      const userCred = await createUserWithEmailAndPassword(auth, email, password);
-
-      // Save to Firestore correctly
-      await setDoc(doc(db, "users", userCred.user.uid), {
-        name,
-        email,
-        createdAt: Date.now(),
-      });
-
-      // Send verification email
-      await sendEmailVerification(userCred.user);
-
-      // IMPORTANT: Sign them OUT so they cannot bypass verification
-      await auth.signOut();
-
-      // Show verification panel — DO NOT navigate away yet
-      showPanel(
-        "Verify Your Email",
-        "A verification link has been sent to your email. Please verify it before logging in.",
-        [
-          {
-            text: "Go to Login",
-            style: "default",
-            onPress: () => {
-              router.replace("/(auth)/login");
-            },
-          },
-        ]
-      );
-
-    } catch (error: any) {
-      const clean = parseFirebaseError(error);
-      showError("Signup Error", clean);
-    } finally {
-      setLoading(false);
+    if (password !== confirmPassword) {
+      showError("Input Error", "Passwords do not match");
+      return;
     }
-  };
+
+    setLoading(true);
+      try {
+        const userCred = await authRN.createUserWithEmailAndPassword(email, password);
+
+        // Firestore write
+        await db.collection("users").doc(userCred.user.uid).set({
+          name,
+          email,
+          createdAt: Date.now(),
+        });
+
+        // Send email verification
+        await userCred.user.sendEmailVerification();
+
+        // Force logout
+        await authRN.signOut();
+
+
+        // Show verification panel — DO NOT navigate away yet
+        showPanel(
+          "Verify Your Email",
+          "A verification link has been sent to your email. Please verify it before logging in.",
+          [
+            {
+              text: "Go to Login",
+              style: "default",
+              onPress: () => {
+                router.replace("/(auth)/login");
+              },
+            },
+          ]
+        );
+
+      } catch (error: any) {
+        const clean = parseFirebaseError(error);
+        showError("Signup Error", clean);
+      } finally {
+        setLoading(false);
+      }
+    };
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>

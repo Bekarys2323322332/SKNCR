@@ -36,6 +36,7 @@ export default {
 
     plugins: [
       "expo-router",
+      "@react-native-firebase/app",
       [
         "expo-splash-screen",
         {
@@ -50,7 +51,6 @@ export default {
         {
           icon: "./assets/images/icon.png",
           color: "#5C6BC0",
-          sounds: ["./assets/notification-sound.wav"]
         }
       ],
       "expo-font"
