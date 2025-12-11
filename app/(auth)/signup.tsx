@@ -1,14 +1,10 @@
 import ErrorModal from "@/components/ErrorModal";
 import MessagePanel, { PanelAction } from "@/components/MessagePanel";
-import { auth, db } from "@/utils/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+;
 
-import {
-  createUserWithEmailAndPassword,
-  sendEmailVerification,
-} from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { authRN, db } from "@/utils/firebaseConfig";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -91,20 +87,21 @@ const signup = () => {
 
   setLoading(true);
     try {
-      const userCred = await createUserWithEmailAndPassword(auth, email, password);
+      const userCred = await authRN.createUserWithEmailAndPassword(email, password);
 
-      // Save to Firestore correctly
-      await setDoc(doc(db, "users", userCred.user.uid), {
+      // Firestore write
+      await db.collection("users").doc(userCred.user.uid).set({
         name,
         email,
         createdAt: Date.now(),
       });
 
-      // Send verification email
-      await sendEmailVerification(userCred.user);
+      // Send email verification
+      await userCred.user.sendEmailVerification();
 
-      // IMPORTANT: Sign them OUT so they cannot bypass verification
-      await auth.signOut();
+      // Force logout
+      await authRN.signOut();
+
 
       // Show verification panel — DO NOT navigate away yet
       showPanel(

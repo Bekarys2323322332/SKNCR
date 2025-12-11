@@ -1,7 +1,6 @@
-import { auth, db } from "@/utils/firebaseConfig";
+import { authRN, db } from "@/utils/firebaseConfig";
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { doc, setDoc } from "firebase/firestore";
 import React, { ReactNode, useEffect, useState } from 'react';
 import {
   Alert,
@@ -245,32 +244,33 @@ const Skincare: React.FC = () => {
   });
   const [showResults, setShowResults] = useState(false);
 
-  useEffect(() => {
-    const user = auth.currentUser;
+useEffect(() => {
+  const run = async () => {
+      const user = authRN.currentUser;
 
-
-    if (!user) {
-      router.replace("/(auth)/login");
-      return;
-    }
-
-
-    user.reload().then(() => {
-      const refreshedUser = auth.currentUser;
-
-      if (!refreshedUser) {
+      if (!user) {
         router.replace("/(auth)/login");
         return;
       }
 
+      await user.reload();
+      const refreshed = authRN.currentUser;
 
-      if (!refreshedUser.emailVerified) {
-        auth.signOut();
+      if (!refreshed) {
         router.replace("/(auth)/login");
         return;
       }
-    });
+
+      if (!refreshed.emailVerified) {
+        await authRN.signOut();
+        router.replace("/(auth)/login");
+        return;
+      }
+    };
+
+    run();
   }, []);
+
 
 
   const currentQuestion = questions[currentStep];
@@ -450,46 +450,42 @@ const Skincare: React.FC = () => {
     setShowResults(true);
 
     try {
-      const user = auth.currentUser;
-      if (!user) {
-        console.log("No user logged in!");
-        Alert.alert("Error", "You must be logged in");
-        router.replace("/(auth)/login");
-        return;
-      }
+      const user = authRN.currentUser;
+    if (!user) {
+      Alert.alert("Error", "You must be logged in");
+      router.replace("/(auth)/login");
+      return;
+    }
 
-      await savePlan({ answers, routine });
+    await savePlan({ answers, routine });
 
-      const userRef = doc(db, "users", user.uid);
-
-      await setDoc(
-  userRef,
-  {
-    skincarePlanCompleted: true,
-    skinType: answers.skinType,
-    concerns: answers.concerns,
-    sunExposure: answers.sunExposure,
-    allergies: answers.allergies,
-    lifestyle: answers.lifestyle,
-    goals: answers.goals,
-    routineLevel: answers.routineLevel,
-    budget: answers.budget,
-    skinSensitivity: answers.skinSensitivity,
-    productPreferences: answers.productPreferences,
-    climateType: answers.climateType,
-    makeupFrequency: answers.makeupFrequency,
-    waterIntake: answers.waterIntake,
-    sleepSchedule: answers.sleepSchedule,
-    stressLevel: answers.stressLevel,
-    previousProducts: answers.previousProducts,
-    skinTexture: answers.skinTexture,
-    timeCommitment: answers.timeCommitment,
-    environmentalExposure: answers.environmentalExposure,
-    dietType: answers.dietType,
-    lastUpdated: new Date().toISOString(),
-  },
-  { merge: true }
-);
+    await db.collection("users").doc(user.uid).set(
+      {
+        skincarePlanCompleted: true,
+        skinType: answers.skinType,
+        concerns: answers.concerns,
+        sunExposure: answers.sunExposure,
+        allergies: answers.allergies,
+        lifestyle: answers.lifestyle,
+        goals: answers.goals,
+        routineLevel: answers.routineLevel,
+        budget: answers.budget,
+        skinSensitivity: answers.skinSensitivity,
+        productPreferences: answers.productPreferences,
+        climateType: answers.climateType,
+        makeupFrequency: answers.makeupFrequency,
+        waterIntake: answers.waterIntake,
+        sleepSchedule: answers.sleepSchedule,
+        stressLevel: answers.stressLevel,
+        previousProducts: answers.previousProducts,
+        skinTexture: answers.skinTexture,
+        timeCommitment: answers.timeCommitment,
+        environmentalExposure: answers.environmentalExposure,
+        dietType: answers.dietType,
+        lastUpdated: new Date().toISOString(),
+      },
+      { merge: true }
+    );
 
       console.log("✅ Saved to Firestore!");
 

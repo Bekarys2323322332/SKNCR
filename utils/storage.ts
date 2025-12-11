@@ -1,83 +1,111 @@
-import { auth, db } from "@/utils/firebaseConfig";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { deleteField, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import auth from "@react-native-firebase/auth";
+import firestore from "@react-native-firebase/firestore";
+
 const STORAGE_KEY = "skincarePlan";
 
+// -----------------------------------------------------------------------------
+// SAVE PLAN
+// -----------------------------------------------------------------------------
+
 export const savePlan = async (plan: any) => {
-  // Save locally
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(plan));
 
-  // Save to Firestore if user is logged in
-  const user = auth.currentUser;
+  const user = auth().currentUser;
   if (user) {
-    const userRef = doc(db, "users", user.uid);
-    await setDoc(userRef, { skincarePlan: plan }, { merge: true });
+    const userRef = firestore().collection("users").doc(user.uid);
+    await userRef.set(
+      { skincarePlan: plan },
+      { merge: true }
+    );
   }
 };
 
+// -----------------------------------------------------------------------------
+// LOAD PLAN
+// -----------------------------------------------------------------------------
 
 export const loadPlan = async () => {
-  const user = auth.currentUser;
+  const user = auth().currentUser;
 
   if (user) {
-    const userRef = doc(db, "users", user.uid);
-    const docSnap = await getDoc(userRef);
-    if (docSnap.exists()) {
-      return docSnap.data().skincarePlan || null;
+    const userRef = firestore().collection("users").doc(user.uid);
+    const snap = await userRef.get();
+    const data = (snap.data() as Record<string, any>) || {};
+
+    if (snap.exists && data.skincarePlan !== undefined) {
+      return data.skincarePlan;
     }
   }
 
-  // Fallback to local storage
+  // fallback to AsyncStorage
   const saved = await AsyncStorage.getItem(STORAGE_KEY);
   return saved ? JSON.parse(saved) : null;
 };
 
+// -----------------------------------------------------------------------------
+// RESET PLAN
+// -----------------------------------------------------------------------------
+
 export const resetPlan = async () => {
   await AsyncStorage.removeItem(STORAGE_KEY);
 
-  const user = auth.currentUser;
+  const user = auth().currentUser;
   if (user) {
-    const userRef = doc(db, "users", user.uid);
-    await updateDoc(userRef, { skincarePlan: deleteField() });
+    const userRef = firestore().collection("users").doc(user.uid);
+
+    await userRef.set(
+      { skincarePlan: firestore.FieldValue.delete() },
+      { merge: true }
+    );
   }
 };
 
-// Dark mode utilities
+// -----------------------------------------------------------------------------
+// DARK MODE TOGGLE
+// -----------------------------------------------------------------------------
+
 const DARK_MODE_KEY = "darkMode";
 
 export const saveDarkMode = async (enabled: boolean) => {
   await AsyncStorage.setItem(DARK_MODE_KEY, JSON.stringify(enabled));
-  
-  // Save to Firestore if user is logged in
-  const user = auth.currentUser;
+
+  const user = auth().currentUser;
   if (user) {
-    const userRef = doc(db, "users", user.uid);
-    await setDoc(userRef, { darkMode: enabled }, { merge: true });
+    const userRef = firestore().collection("users").doc(user.uid);
+    await userRef.set(
+      { darkMode: enabled },
+      { merge: true }
+    );
   }
 };
 
 export const loadDarkMode = async (): Promise<boolean> => {
-  const user = auth.currentUser;
+  const user = auth().currentUser;
 
   if (user) {
-    const userRef = doc(db, "users", user.uid);
-    const docSnap = await getDoc(userRef);
-    if (docSnap.exists() && docSnap.data().darkMode !== undefined) {
-      return docSnap.data().darkMode as boolean;
+    const userRef = firestore().collection("users").doc(user.uid);
+    const snap = await userRef.get();
+    const data = (snap.data() as Record<string, any>) || {};
+
+    if (snap.exists && data.darkMode !== undefined) {
+      return data.darkMode as boolean;
     }
   }
 
-  // Fallback to local storage
+  // Fallback to AsyncStorage
   const saved = await AsyncStorage.getItem(DARK_MODE_KEY);
   return saved ? JSON.parse(saved) : false;
 };
 
+// -----------------------------------------------------------------------------
+// WIPE LOCAL USER DATA
+// -----------------------------------------------------------------------------
 
 export const wipeAllUserLocalData = async (uid: string) => {
   try {
     const keys = await AsyncStorage.getAllKeys();
 
-    // patterns to clean
     const userPatterns = [
       `streakPhotos_${uid}`,
       `hardModeLocal_${uid}`,
@@ -88,7 +116,6 @@ export const wipeAllUserLocalData = async (uid: string) => {
       `checkedInDates_${uid}`,
     ];
 
-    // filter any key that starts with or includes the UID
     const keysToDelete = keys.filter(key =>
       userPatterns.some(pattern => key.startsWith(pattern) || key.includes(pattern))
     );

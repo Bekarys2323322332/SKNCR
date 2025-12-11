@@ -1,15 +1,12 @@
 import MessagePanel, { PanelAction } from "@/components/MessagePanel";
-import { auth, db } from "@/utils/firebaseConfig";
+import { authRN, db } from "@/utils/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { reload, sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import { ActivityIndicator, Animated, Keyboard, KeyboardAvoidingView, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ErrorModal from "../../components/ErrorModal";
 import { parseFirebaseError } from "../../utils/parseFirebaseError";
-
 
 
 
@@ -68,25 +65,26 @@ const login = () => {
   setLoading(true);
 
   try {
-    const userCred = await signInWithEmailAndPassword(auth, email, password);
+    const userCred = await authRN.signInWithEmailAndPassword(email, password);
 
-    await reload(userCred.user);
+    await userCred.user.reload();
 
     if (!userCred.user.emailVerified) {
-      await auth.signOut();
+      await authRN.signOut();
       showError("Email Not Verified", "Please verify your email before logging in.");
       return;
     }
 
-    const userDoc = await getDoc(doc(db, "users", userCred.user.uid));
+    const userDoc = await db.collection("users").doc(userCred.user.uid).get();
+
 
     // safety
-    if (!userDoc.exists()) {
+    if (!userDoc.exists) {
       showError("Error", "User profile not found.");
       return;
     }
 
-    const data = userDoc.data();
+    const data = userDoc.data() || {};
 
 
     if (!data.skincarePlanCompleted) {
@@ -115,7 +113,7 @@ const login = () => {
     }
 
     try {
-      await sendPasswordResetEmail(auth, email);
+      await authRN.sendPasswordResetEmail(email);
       showPanel("Password Reset", "Password reset link sent to your email.");
     } catch (err: any) {
       const clean = parseFirebaseError(err);

@@ -1,13 +1,12 @@
-import { auth, db } from '@/utils/firebaseConfig';
 import { loadDarkMode } from '@/utils/storage';
 import Ionicons from "@expo/vector-icons/Ionicons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import auth from "@react-native-firebase/auth";
+import firestore from "@react-native-firebase/firestore";
 import { differenceInCalendarDays, format } from 'date-fns';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
 import { router, useFocusEffect } from 'expo-router';
-import { onAuthStateChanged, reload } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Image, Linking, Modal, Platform, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import CalendarModal from '../../components/CalendarModal';
@@ -15,6 +14,7 @@ import ErrorModal from '../../components/ErrorModal';
 import MessagePanel, { PanelAction } from '../../components/MessagePanel';
 import PhotoViewer from '../../components/PhotoViewer';
 import UVLevelPanel from "../../components/UvPanel";
+
 
 interface CheckInData {
   completed: boolean;
@@ -47,16 +47,19 @@ Notifications.setNotificationHandler({
     shouldShowList: true,
   }),
 });
+
+const serverTimestamp = firestore.FieldValue.serverTimestamp;
+
 // Get current time from Firestore server, not device
 const getServerDate = async (): Promise<Date> => {
   try {
-    const serverRef = doc(db, "_meta", "serverTime");
-    await setDoc(
-      serverRef,
+    const serverRef = firestore().collection("_meta").doc("serverTime");
+    await serverRef.set(
       { now: serverTimestamp() },
       { merge: true }
     );
-    const snap = await getDoc(serverRef);
+    const snap = await serverRef.get();
+
     const data = snap.data();
     const ts = data?.now;
     if (ts && typeof ts.toDate === "function") {
@@ -160,21 +163,22 @@ const StreakScreen: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
-
-      
+    const unsubscribeAuth = auth().onAuthStateChanged(async (currentUser) => {
       if (!currentUser) {
         router.replace("/(auth)/login");
         return;
       }
 
-      await reload(currentUser);
+      await currentUser.reload();
+      const refreshed = auth().currentUser;
 
-      if (!currentUser.emailVerified) {
-        await auth.signOut();
+      if (!refreshed || !refreshed.emailVerified) {
+        await auth().signOut();
         router.replace("/(auth)/login");
         return;
       }
+
+
 
 
       if (!isMounted) return;
@@ -250,14 +254,16 @@ const StreakScreen: React.FC = () => {
   // ---- Data helpers ----
 
   async function loadUserData(userId: string): Promise<void> {
-    const userRef = doc(db, "users", userId);
-    const userDoc = await getDoc(userRef);
+    const userRef = firestore().collection("users").doc(userId);
+    const userDoc = await userRef.get();
+
+
 
     const today = await getServerDate();
     const todayStr = format(today, 'yyyy-MM-dd');
 
-    if (!userDoc.exists()) {
-      await setDoc(userRef, {
+    if (!userDoc.exists) {
+      await userRef.set({
         streakCount: 0,
         lastCheckin: null,
         hasCheckedInToday: false,
@@ -276,7 +282,7 @@ const StreakScreen: React.FC = () => {
       return;
     }
 
-    const data = userDoc.data();
+    const data = userDoc.data() || {};
 
     // 1. Load hard mode instantly from local storage (instant UI update)
     const localHardMode = await AsyncStorage.getItem(`hardModeLocal_${userId}`);
@@ -308,14 +314,14 @@ const StreakScreen: React.FC = () => {
         // streak broken
         currentStreak = 0;
         checkedToday = false;
-        await setDoc(userRef, {
+        await userRef.set({
           streakCount: 0,
           hasCheckedInToday: false
         }, { merge: true });
       } else if (diff >= 1) {
         // new day
         checkedToday = false;
-        await setDoc(userRef, {
+        await userRef.set({
           hasCheckedInToday: false
         }, { merge: true });
       }
@@ -352,7 +358,8 @@ const StreakScreen: React.FC = () => {
 
   async function loadStreakPhotos(): Promise<void> {
     try {
-      const uid = auth.currentUser?.uid;
+      const uid = auth().currentUser?.uid;
+
       if (!uid) return;
       const savedPhotos = await AsyncStorage.getItem(`streakPhotos_${uid}`);
       if (savedPhotos) {
@@ -366,7 +373,7 @@ const StreakScreen: React.FC = () => {
   async function loadDailyCheckIns(): Promise<void> {
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
-      const uid = auth.currentUser?.uid;
+      const uid = auth().currentUser?.uid;
       if (!uid) return;
 
       const morningData = await AsyncStorage.getItem(`${uid}_morning_${today}`);
@@ -397,7 +404,8 @@ const StreakScreen: React.FC = () => {
   async function saveDailyCheckIn(type: 'morning' | 'evening', data: CheckInData): Promise<void> {
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
-      const uid = auth.currentUser?.uid;
+      const uid = auth().currentUser?.uid;
+
       if (!uid) return;
 
       await AsyncStorage.setItem(`${uid}_${type}_${today}`, JSON.stringify(data));
@@ -421,7 +429,8 @@ const StreakScreen: React.FC = () => {
         ...streakPhotos,
         [photoKey]: photoUri,
       };
-      const uid = auth.currentUser?.uid;
+      const uid = auth().currentUser?.uid;
+
       if (!uid) return false;
       await AsyncStorage.setItem(`streakPhotos_${uid}`, JSON.stringify(updatedPhotos));
       setStreakPhotos(updatedPhotos);
@@ -434,7 +443,8 @@ const StreakScreen: React.FC = () => {
   }
     useFocusEffect(
       React.useCallback(() => {
-        const uid = auth.currentUser?.uid;
+        const uid = auth().currentUser?.uid;
+
         if (!uid) return; 
         loadUserData(uid);
       }, [])
@@ -499,72 +509,70 @@ const StreakScreen: React.FC = () => {
 
 
   async function saveDateToFirestore(date: Date): Promise<void> {
-    const currentUser = auth.currentUser;
+    const currentUser = auth().currentUser;
     if (!currentUser) return;
 
-    const userRef = doc(db, "users", currentUser.uid);
-    const dateStr = format(date, "yyyy-MM-dd");
+    const userRef = firestore().collection("users").doc(currentUser.uid);
+    const snapshot = await userRef.get();
 
-    const snapshot = await getDoc(userRef);
+    const dateStr = format(date, "yyyy-MM-dd");
     const existing = snapshot.data()?.checkinDates || [];
 
     if (!existing.includes(dateStr)) {
       const updated = [...existing, dateStr];
 
-      await setDoc(
-        userRef,
-        { checkinDates: updated },
-        { merge: true }
-      );
-
+    await userRef.set(
+      { checkinDates: updated },
+      { merge: true }
+    );
       setCheckedInDates(new Set(updated));
     }
   }
 
   async function savePartialCheckInProgress(dateStr: string, type: 'morning' | 'evening'): Promise<void> {
-    const currentUser = auth.currentUser;
-    if (!currentUser) return;
+  const currentUser = auth().currentUser;
+  if (!currentUser) return;
 
-    const userRef = doc(db, "users", currentUser.uid);
-    const userDoc = await getDoc(userRef);
-    const existing = userDoc.data()?.checkinProgress || {};
+  const userRef = firestore().collection("users").doc(currentUser.uid);
+  const userDoc = await userRef.get();
 
-    const day = existing[dateStr] || { morning: false, evening: false };
-    day[type] = true;
+  const existing = userDoc.data()?.checkinProgress || {};
 
-    await setDoc(
-      userRef,
-      {
-        checkinProgress: {
-          ...existing,
-          [dateStr]: day,
-        },
+  const day = existing[dateStr] || { morning: false, evening: false };
+  day[type] = true;
+
+  await userRef.set(
+    {
+      checkinProgress: {
+        ...existing,
+        [dateStr]: day,
       },
-      { merge: true }
-    );
+    },
+    { merge: true }
+  );
 
-    // Update local calendar details immediately
-    setCheckinDetails(prev => {
-      const prevDay = prev[dateStr] || {
-        morningDone: false,
-        eveningDone: false,
-        completedHardMode: false
-      };
+  setCheckinDetails(prev => {
+    const prevDay = prev[dateStr] || {
+      morningDone: false,
+      eveningDone: false,
+      completedHardMode: false
+    };
 
-      const updatedDay: CheckinDetail = {
-        morningDone: type === 'morning' ? true : prevDay.morningDone,
-        eveningDone: type === 'evening' ? true : prevDay.eveningDone,
-        completedHardMode:
-          (type === 'morning' ? true : prevDay.morningDone) &&
-          (type === 'evening' ? true : prevDay.eveningDone),
-      };
+    const updatedDay: CheckinDetail = {
+      morningDone: type === 'morning' ? true : prevDay.morningDone,
+      eveningDone: type === 'evening' ? true : prevDay.eveningDone,
+      completedHardMode:
+        (type === 'morning' ? true : prevDay.morningDone) &&
+        (type === 'evening' ? true : prevDay.eveningDone),
+    };
 
-      return {
-        ...prev,
-        [dateStr]: updatedDay
-      };
-    });
-  }
+    return {
+      ...prev,
+      [dateStr]: updatedDay
+    };
+  });
+}
+
 
   // ---- Image picking ----
 
@@ -719,7 +727,7 @@ const StreakScreen: React.FC = () => {
   };
 
   const handleEasyModeCheckIn = async (): Promise<void> => {
-    const currentUser = auth.currentUser;
+    const currentUser = auth().currentUser;
     if (!currentUser) {
       showError("Error", "Please sign in to check in");
       return;
@@ -728,15 +736,16 @@ const StreakScreen: React.FC = () => {
     setCheckingIn(true);
 
     try {
-      const userRef = doc(db, "users", currentUser.uid);
-      const userDoc = await getDoc(userRef);
+      const userRef = firestore().collection("users").doc(currentUser.uid);
+      const userDoc = await userRef.get();
 
-      if (!userDoc.exists()) {
+
+      if (!userDoc.exists) {
         setCheckingIn(false);
         return;
       }
 
-      const data = userDoc.data();
+      const data = userDoc.data() || {};
 
       // Cross-device protection
       if (data.hasCheckedInToday === true) {
@@ -770,7 +779,7 @@ const StreakScreen: React.FC = () => {
         }
       }
 
-      await setDoc(userRef, {
+      await userRef.set({
         streakCount: newStreak,
         lastCheckin: serverTimestamp(),
         hasCheckedInToday: true
@@ -804,7 +813,7 @@ const StreakScreen: React.FC = () => {
   };
 
   const handleHardModeCheckIn = async (): Promise<void> => {
-    const currentUser = auth.currentUser;
+    const currentUser = auth().currentUser;
     if (!currentUser) {
       showError("Error", "Please sign in to check in");
       return;
@@ -813,15 +822,16 @@ const StreakScreen: React.FC = () => {
     setCheckingIn(true);
 
     try {
-      const userRef = doc(db, "users", currentUser.uid);
-      const userDoc = await getDoc(userRef);
+      const userRef = firestore().collection("users").doc(currentUser.uid);
+      const userDoc = await userRef.get();
 
-      if (!userDoc.exists()) {
+
+      if (!userDoc.exists) {
         setCheckingIn(false);
         return;
       }
 
-      const data = userDoc.data();
+      const data = userDoc.data() || {};
       const today = await getServerDate();
       const checkInType = currentCheckInType;
 
@@ -882,7 +892,7 @@ const StreakScreen: React.FC = () => {
         if (diff > 1) newStreak = 1;
       }
 
-      await setDoc(userRef, {
+      await userRef.set({
         streakCount: newStreak,
         lastCheckin: serverTimestamp(),
         hasCheckedInToday: true
