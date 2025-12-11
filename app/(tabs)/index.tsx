@@ -47,6 +47,28 @@ Notifications.setNotificationHandler({
     shouldShowList: true,
   }),
 });
+// Get current time from Firestore server, not device
+const getServerDate = async (): Promise<Date> => {
+  try {
+    const serverRef = doc(db, "_meta", "serverTime");
+    await setDoc(
+      serverRef,
+      { now: serverTimestamp() },
+      { merge: true }
+    );
+    const snap = await getDoc(serverRef);
+    const data = snap.data();
+    const ts = data?.now;
+    if (ts && typeof ts.toDate === "function") {
+      return ts.toDate();
+    }
+  } catch (e) {
+    console.error("Failed to get server time, falling back to device time", e);
+  }
+  // Fallback – still works, just not cheat-proof
+  return new Date();
+};
+
 
 
 const StreakScreen: React.FC = () => {
@@ -231,7 +253,7 @@ const StreakScreen: React.FC = () => {
     const userRef = doc(db, "users", userId);
     const userDoc = await getDoc(userRef);
 
-    const today = new Date();
+    const today = await getServerDate();
     const todayStr = format(today, 'yyyy-MM-dd');
 
     if (!userDoc.exists()) {
@@ -417,32 +439,64 @@ const StreakScreen: React.FC = () => {
         loadUserData(uid);
       }, [])
     );
-  const scheduleHourlyReminders = async () => {
-    const hasPermission = await requestNotificationPermission();
-    if (!hasPermission) return;
+  const scheduleDailyReminders = async (
+  hardMode: boolean,
+  morningDone: boolean,
+  eveningDone: boolean
+) => {
+  const hasPermission = await requestNotificationPermission();
+  if (!hasPermission) return;
 
-    await Notifications.cancelAllScheduledNotificationsAsync();
+  // Clear old reminders on THIS device
+  await Notifications.cancelAllScheduledNotificationsAsync();
 
-    const reminders = [
-      { hours: 12, body: "It's been 12 hours! Don't forget to check in and keep your streak alive!" },
-      { hours: 18, body: "18 hours passed. Make sure you complete your check-in today!" },
-      { hours: 23, body: "23 hours! Final reminder before your streak resets!" },
-    ];
+  const now = new Date();
 
-    for (let r of reminders) {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Check-In Reminder",
-          body: r.body,
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: r.hours * 60 * 60,
-          repeats: false,
-        },
-      });
+  const scheduleAt = async (hour: number, minute: number, body: string) => {
+    const target = new Date();
+    target.setHours(hour, minute, 0, 0);
+
+    // If time already passed today → schedule for tomorrow
+    if (target <= now) {
+      target.setDate(target.getDate() + 1);
     }
+
+    const seconds = Math.max(
+      5,
+      Math.round((target.getTime() - now.getTime()) / 1000)
+    );
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "Check-in Reminder",
+        body,
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds,
+        repeats: false,
+      },
+    });
   };
+
+  if (!hardMode) {
+    // EASY MODE
+    // Always schedule 09:00 and 19:00 next occurrences
+    await scheduleAt(9, 0, "Time to check in and keep your skincare streak going! ✨");
+    await scheduleAt(19, 0, "Don't forget to check in before the day ends! 🔥");
+  } else {
+    // HARD MODE
+    // Morning reminder at 12:00 if morning not done
+    if (!morningDone) {
+      await scheduleAt(12, 0, "Morning check-in reminder 🔆");
+    }
+    // Evening reminder at 20:00 if evening not done
+    if (!eveningDone) {
+      await scheduleAt(20, 0, "Evening check-in reminder 🌙 Complete your day!");
+    }
+  }
+};
+
 
   async function saveDateToFirestore(date: Date): Promise<void> {
     const currentUser = auth.currentUser;
@@ -650,7 +704,6 @@ const StreakScreen: React.FC = () => {
   // ---- Check-in logic ----
 
   const checkIn = async (): Promise<void> => {
-    await Notifications.cancelAllScheduledNotificationsAsync();
     if (checkingIn) return;
 
     if (!selectedPhoto) {
@@ -700,7 +753,7 @@ const StreakScreen: React.FC = () => {
         return;
       }
 
-      const today = new Date();
+      const today = await getServerDate();
       const lastCheckin = data.lastCheckin ? data.lastCheckin.toDate() : null;
       let newStreak = data.streakCount ?? 0;
 
@@ -739,7 +792,9 @@ const StreakScreen: React.FC = () => {
         setTimeout(() => setShowMilestoneModal(false), 3000);
       }
 
-      await scheduleHourlyReminders();
+      // Easy mode → schedule 09:00 & 19:00 reminders (starting next valid time)
+      await scheduleDailyReminders(false, false, false);
+
     } catch (err) {
       console.error("Check-in error:", err);
       showError("Error", "Failed to check in.");
@@ -767,7 +822,7 @@ const StreakScreen: React.FC = () => {
       }
 
       const data = userDoc.data();
-      const today = new Date();
+      const today = await getServerDate();
       const checkInType = currentCheckInType;
 
       // Global lock if day already marked complete (across devices)
@@ -800,11 +855,16 @@ const StreakScreen: React.FC = () => {
       const bothDone =
         (checkInType === "morning" ? true : morningCheckIn.completed) &&
         (checkInType === "evening" ? true : eveningCheckIn.completed);
+      const newMorningDone =
+        checkInType === "morning" ? true : morningCheckIn.completed;
+      const newEveningDone =
+        checkInType === "evening" ? true : eveningCheckIn.completed;
 
       if (!bothDone) {
         showPanel("Congratulutaions!", `${checkInType} check-in completed!`);
         setCheckingIn(false);
         setSelectedPhoto(null);
+        await scheduleDailyReminders(true, newMorningDone, newEveningDone);
         return;
       }
 
@@ -839,7 +899,11 @@ const StreakScreen: React.FC = () => {
         setTimeout(() => setShowMilestoneModal(false), 15000);
       }
 
-      await scheduleHourlyReminders();
+      // Hard mode 
+      // - 12:00 reminder if morning not done
+      // - 20:00 reminder if evening not done
+      await scheduleDailyReminders(true, newMorningDone, newEveningDone);
+
     } catch (err) {
       console.error("hard mode error:", err);
       showError("Error", "Failed to check in.");
