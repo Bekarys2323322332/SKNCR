@@ -1,9 +1,10 @@
 import MessagePanel, { PanelAction } from "@/components/MessagePanel";
-
-import { authRN, db } from "@/utils/firebaseConfig";
+import { auth, db } from "@/utils/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { reload, sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import React, { useState } from "react";
 import { ActivityIndicator, Animated, Keyboard, KeyboardAvoidingView, Platform, Text, TextInput, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ErrorModal from "../../components/ErrorModal";
@@ -67,17 +68,17 @@ const login = () => {
   setLoading(true);
 
   try {
-    const userCred = await authRN.signInWithEmailAndPassword(email, password);
+    const userCred = await signInWithEmailAndPassword(auth, email, password);
 
-    await userCred.user.reload();
+    await reload(userCred.user);
 
     if (!userCred.user.emailVerified) {
-      await authRN.signOut();
+      await auth.signOut();
       showError("Email Not Verified", "Please verify your email before logging in.");
       return;
     }
 
-    const userDoc = await db.collection("users").doc(userCred.user.uid).get();
+    const userDoc = await getDoc(doc(db, "users", userCred.user.uid));
 
     // safety
     if (!userDoc.exists()) {
@@ -87,12 +88,12 @@ const login = () => {
 
     const data = userDoc.data();
 
-    if (!data || !data.skincarePlanCompleted) {
+
+    if (!data.skincarePlanCompleted) {
       router.replace("/(auth)/skincare");
     } else {
       router.replace("../(tabs)");
     }
-
 
 
     } catch (error: any) {
@@ -114,7 +115,7 @@ const login = () => {
     }
 
     try {
-      await authRN.sendPasswordResetEmail(email);
+      await sendPasswordResetEmail(auth, email);
       showPanel("Password Reset", "Password reset link sent to your email.");
     } catch (err: any) {
       const clean = parseFirebaseError(err);
