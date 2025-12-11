@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "614028536844",
+    "project_id": "skncr-d6201",
+    "storage_bucket": "skncr-d6201.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:614028536844:android:acc2e64bfbc8c899291229",
+        "android_client_info": {
+          "package_name": "com.rakhymbekdev.skncr"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2IxWZlgMmLL-UmcOeFGNHRyK1b1iO5Pc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
